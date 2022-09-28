@@ -1,0 +1,44 @@
+Source: bctoolbox
+Priority: optional
+Maintainer: Debian VoIP Team <pkg-voip-maintainers@lists.alioth.debian.org>
+Uploaders: Bernhard Schmidt <berni@debian.org>
+Build-Depends: cmake,
+               debhelper-compat (= 12),
+               libmbedtls-dev,
+Standards-Version: 4.5.1
+Section: libs
+Homepage: https://gitlab.linphone.org/BC/public/bctoolbox
+Vcs-Git: https://salsa.debian.org/pkg-voip-team/linphone-stack/bctoolbox.git
+Vcs-Browser: https://salsa.debian.org/pkg-voip-team/linphone-stack/bctoolbox
+
+Package: libbctoolbox-dev
+Section: libdevel
+Architecture: any
+Depends: libbctoolbox1 (= ${binary:Version}),
+         ${misc:Depends},
+Description: Helper code for software by Belledonne Communications (development headers)
+ The package provides a C/C++ utility library used by Linphone and other
+ software by Belledonne Communications. The library offers platform independent
+ implementations of cryptographic functions, exception handling, logging
+ modules, file access, unit tests and data structures like lists and maps.
+ .
+ The package is probably not useful outside the Belledonne Communications suite
+ of libraries and programs.
+ .
+ This package contains the development headers.
+
+Package: libbctoolbox1
+Architecture: any
+Multi-Arch: same
+Depends: ${misc:Depends},
+         ${shlibs:Depends},
+Description: Helper library for software by Belledonne Communications (shared library)
+ The package provides a C/C++ utility library used by Linphone and other
+ software by Belledonne Communications. The library offers platform independent
+ implementations of cryptographic functions, exception handling, logging
+ modules, file access, unit tests and data structures like lists and maps.
+ .
+ The package is probably not useful outside the Belledonne Communications suite
+ of libraries and programs.
+ .
+ This package contains the shared library.

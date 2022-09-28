@@ -1,0 +1,86 @@
+bctoolbox (4.4.13-3) UNRELEASED; urgency=medium
+
+  * update
+
+ -- Debian VoIP Team <pkg-voip-maintainers@lists.alioth.debian.org>  Tue, 07 Jun 2022 15:59:39 +0800
+
+bctoolbox (4.4.13-3) unstable; urgency=medium
+
+  [ Bernhard Schmidt ]
+  * Drop cmake version constraint satisfied in oldstable
+
+  [ Andrea Pappacoda ]
+  * d/patches: fix GCC 11 build. Closes: #983985
+
+ -- Bernhard Schmidt <berni@debian.org>  Sun, 30 Jan 2022 14:13:51 +0100
+
+bctoolbox (4.4.13-2) unstable; urgency=medium
+
+  * Team upload
+  * Release to unstable
+  * Drop Daniel as Uploader, add myself
+  * Fix Homepage, bump S-V to 4.5.1 (Closes: #974749)
+
+ -- Bernhard Schmidt <berni@debian.org>  Fri, 25 Dec 2020 14:28:41 +0100
+
+bctoolbox (4.4.13-1) experimental; urgency=medium
+
+  * Team upload.
+  * New upstream version 4.4.13
+  * Change Vcs-* to linphone-stack subgroup
+  * Use debhelper-compat (= 12)
+
+ -- Bernhard Schmidt <berni@debian.org>  Mon, 07 Dec 2020 10:21:34 +0100
+
+bctoolbox (4.4.0-1) experimental; urgency=medium
+
+  * Team upload.
+  * New upstream version 4.4.0
+    - update d/copyright, upstream has relicensed to GPL-3+
+
+ -- Bernhard Schmidt <berni@debian.org>  Wed, 08 Jul 2020 17:04:52 +0200
+
+bctoolbox (4.3.1-1) experimental; urgency=medium
+
+  * Team upload.
+  * New upstream version 4.3.1
+  * Packaging Change: Switch from upstream git repository to upstream
+    release tarballs. All of the other part projects use this scheme,
+    make it consistent in the linphone stack.
+  * d/watch: Switch to upstream primary Gitlab, only use releases
+  * d/gbp.conf: Drop pristine-tar and use default upstream tags
+  * Adjust d/libbctoolbox1.shlibs for new upstream version
+  * Delete all patches, applied/fixed upstream
+  * Fix Homepage
+
+ -- Bernhard Schmidt <berni@debian.org>  Mon, 01 Jun 2020 22:58:16 +0200
+
+bctoolbox (0.6.0-2) unstable; urgency=medium
+
+  * Team upload.
+  * Use debhelper v11
+  * Set Multi-Arch: same for libbctoolbox1
+  * Update Vcs-URLs to salsa.d.o
+  * Update d/copyright
+  * Add new patch to fix FTBFS with new mbedtls-2.7.0.
+    Thanks to James Cowgill <jcowgill@debian.org> (Closes: #890417)
+  * Update Standards-Version to 4.1.3, no changes needed
+  * Update d/watch to github location
+  * Remove d/README.source, no longer applies
+
+ -- Dr. Tobias Quathamer <toddy@debian.org>  Wed, 14 Feb 2018 20:33:51 +0100
+
+bctoolbox (0.6.0-1) unstable; urgency=medium
+
+  * Team upload.
+  * New upstream version
+    - Bump static deps in libbctoolbox1.shlibs
+
+ -- Bernhard Schmidt <berni@debian.org>  Sun, 15 Oct 2017 23:05:54 +0200
+
+bctoolbox (0.5.1-1) unstable; urgency=medium
+
+  [ Daniel Gnoutcheff ]
+  * Initial release (Closes: #849491)
+
+ -- Bernhard Schmidt <berni@debian.org>  Wed, 05 Jul 2017 19:52:34 +0200
