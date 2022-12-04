@@ -1,8 +1,8 @@
-bctoolbox (4.4.13-3) UNRELEASED; urgency=medium
+bctoolbox (4.4.13.1-deepin1) unstable; urgency=medium
 
-  * update
+  * Fix build failure on deepin riscv 
 
- -- Debian VoIP Team <pkg-voip-maintainers@lists.alioth.debian.org>  Tue, 07 Jun 2022 15:59:39 +0800
+ -- Gui-Yue <yuemeng.gui@gmail.com>  Sun, 04 Dec 2022 06:56:23 +0000
 
 bctoolbox (4.4.13-3) unstable; urgency=medium
 
