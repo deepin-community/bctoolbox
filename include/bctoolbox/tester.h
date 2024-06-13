@@ -41,6 +41,8 @@ typedef struct {
 	const char *tags[2];
 } test_t;
 
+#define TEST_NO_TAG_AUTO_NAMED(func) \
+	{ #func, func, { NULL, NULL } }
 #define TEST_NO_TAG(name, func) \
 	{ name, func, { NULL, NULL } }
 #define TEST_ONE_TAG(name, func, tag) \
@@ -78,6 +80,9 @@ BCTBX_PUBLIC int bc_tester_register_suites(void);
 
 BCTBX_PUBLIC int bc_tester_register_suite_by_name(const char *suite_name);
 BCTBX_PUBLIC void bc_tester_add_suite(test_suite_t *suite);
+BCTBX_PUBLIC void bc_tester_set_max_parallel_suites(int max_parallel_suites);
+BCTBX_PUBLIC void bc_tester_set_max_failed_tests_threshold(int max_failed_tests_threshold);
+BCTBX_PUBLIC void bc_tester_set_global_timeout(int seconds);
 BCTBX_PUBLIC void bc_tester_uninit(void);
 BCTBX_PUBLIC void bc_tester_printf(int level, const char *fmt, ...);
 BCTBX_PUBLIC const char * bc_tester_get_resource_dir_prefix(void);
@@ -88,6 +93,8 @@ BCTBX_PUBLIC void bc_tester_set_writable_dir_prefix(const char *name);
 BCTBX_PUBLIC void bc_tester_set_silent_func(int (*func)(const char*));
 BCTBX_PUBLIC void bc_tester_set_verbose_func(int (*func)(const char*));
 BCTBX_PUBLIC void bc_tester_set_logfile_func(int (*func)(const char*));
+BCTBX_PUBLIC void bc_tester_set_process_events_func(void (*func)(void));
+BCTBX_PUBLIC void bc_tester_process_events(void);
 
 BCTBX_PUBLIC int bc_tester_nb_suites(void);
 BCTBX_PUBLIC int bc_tester_nb_tests(const char* name);

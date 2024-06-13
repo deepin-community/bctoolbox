@@ -1,11 +1,11 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: bctoolbox
-Source: https://github.com/BelledonneCommunications/bctoolbox
+Source: https://gitlab.linphone.org/BC/public/bctoolbox.git
 Comment: Licence information current as of version 0.2.0, heavily based
  upon the output of licencecheck.
 
 Files: *
-Copyright: 2010-2020, Belledonne Communications SARL
+Copyright: 2010-2022, Belledonne Communications SARL
 License: GPL-3+
 
 Files: cmake/*
@@ -14,7 +14,9 @@ License: GPL-2+
 
 Files: debian/*
 Copyright: 2018, Dr. Tobias Quathamer <toddy@debian.org>
-  2016, Daniel Gnoutcheff <daniel@gnoutcheff.name>
+           2016, Daniel Gnoutcheff <daniel@gnoutcheff.name>
+           2017-2021, Bernhard Schmidt <berni@debian.org>
+           2022, Dennis Filder <d.filder@web.de>
 License: GPL-2+
 
 Files: include/bctoolbox/exception.hh
@@ -709,8 +711,6 @@ License: GPL-2+
  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 License: GPL-3+
- This software is Copyright (c) 2020 by foo.
- .
  This is free software, licensed under:
  .
    The GNU General Public License, Version 3, June 2007

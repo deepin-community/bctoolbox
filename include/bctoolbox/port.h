@@ -38,7 +38,7 @@
 #include <string.h>
 #include <wchar.h>
 
-#ifdef __linux
+#ifdef __linux__
 #include <stdint.h>
 #endif
 
@@ -141,13 +141,107 @@ unsigned long __bctbx_thread_self(void);
 #if defined(__MINGW32__) || !defined(WINAPI_FAMILY_PARTITION) || !defined(WINAPI_PARTITION_DESKTOP)
 #define BCTBX_WINDOWS_DESKTOP 1
 #elif defined(WINAPI_FAMILY_PARTITION)
+//WINAPI_PARTITION_PC_APP => UWP
+//WINAPI_PARTITION_DESKTOP => Win32 Only
+//WINAPI_PARTITION_PHONE_APP => Windows Phone Store
+//WINAPI_PARTITION_APP => UWP+Windows Phone Store
+// On UWP, we have : 1001
+// On Desktop : we have : 1101
+// Uncomment line below to check combination
+//#define BCTBX_CHECK_FAMILY
+#ifdef BCTBX_CHECK_FAMILY
+        #if defined (WINAPI_PARTITION_PC_APP) && WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_PC_APP)
+        #define FAMILY1
+        #endif
+        #if defined (WINAPI_PARTITION_DESKTOP) && WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
+        #define FAMILY2
+        #endif
+        #if defined (WINAPI_PARTITION_PHONE_APP) && WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_PHONE_APP)
+        #define FAMILY3
+        #endif
+        #if defined (WINAPI_PARTITION_APP) && WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_APP)
+        #define FAMILY4
+        #endif
+
+        #ifdef FAMILY1
+                #ifdef FAMILY2
+                        #ifdef FAMILY3
+                                #ifdef FAMILY4
+                                        #error 1111
+                                #else
+                                        #error 1110
+                                #endif
+                        #else
+                                #ifdef FAMILY4
+                                        #error 1101
+                                #else
+                                        #error 1100
+                                #endif
+
+                        #endif
+                #else
+                        #ifdef FAMILY3
+                                #ifdef FAMILY4
+                                        #error 1011
+                                #else
+                                        #error 1010
+                                #endif
+                        #else
+                                #ifdef FAMILY4
+                                        #error 1001
+                                #else
+                                        #error 1000
+                                #endif
+
+                        #endif
+                #endif
+        #else
+                #ifdef FAMILY2
+                        #ifdef FAMILY3
+                                #ifdef FAMILY4
+                                        #error 0111
+                                #else
+                                        #error 0110
+                                #endif
+                        #else
+                                #ifdef FAMILY4
+                                        #error 0101
+                                #else
+                                        #error 0100
+                                #endif
+
+                        #endif
+                #else
+                        #ifdef FAMILY3
+                                #ifdef FAMILY4
+                                        #error 0011
+                                #else
+                                        #error 0010
+                                #endif
+                        #else
+                                #ifdef FAMILY4
+                                        #error 0001
+                                #else
+                                        #error 0000
+                                #endif
+
+                        #endif
+                #endif
+        #endif
+#endif
+
 #if defined(WINAPI_PARTITION_DESKTOP) && WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
 #define BCTBX_WINDOWS_DESKTOP 1
+#elif defined (WINAPI_PARTITION_PC_APP) && WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_PC_APP)
+#define BCTBX_WINDOWS_DESKTOP 1
+#define BCTBX_WINDOWS_UWP 1
 #elif defined(WINAPI_PARTITION_PHONE_APP) && WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_PHONE_APP)
 #define BCTBX_WINDOWS_PHONE 1
 #elif defined(WINAPI_PARTITION_APP) && WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_APP)
 #define BCTBX_WINDOWS_UNIVERSAL 1
 #endif
+
+
 #endif
 
 #ifndef BCTBX_DEPRECATED
@@ -421,14 +515,58 @@ BCTBX_PUBLIC char *bctbx_dirname(const char *path);
 BCTBX_PUBLIC char *bctbx_basename(const char *path);
 
 /**
- * Tests if a file with given pathname exists. Return 0 if yes, -1 otherwise.
+ * Tests if a file with given path exists.
+ *
+ * @param[in]	path	the file path to test
+ * @return 0 if yes, -1 otherwise.
 **/
 BCTBX_PUBLIC int bctbx_file_exist(const char *pathname);
 
 /**
- * Tests if a directory with given pathname exists. Return 0 if yes, -1 otherwise.
+ * Tests if a directory with given pathname exists.
+ *
+ * @param[in]	pathname	the directory path to test
+ * @return TRUE if yes, FALSE otherwise.
 **/
 BCTBX_PUBLIC bool_t bctbx_directory_exists(const char *pathname);
+
+/* we just need to be able to return a pointer of type bctbx_list_t, the actual structure is defined in list.h */
+struct _bctbx_list;
+
+/**
+ * Parse a directory and return a list of all its files and subdirectories
+ *
+ * @param[in]	path		The directory to parse
+ * @param[in]	file_type	select only files with that extension, can be NULL in that case it returns all files.
+ *
+ * @note	. and .. file descriptors are never returned in the list, even when file_type is set to NULL
+ * 		The returned list includes the given path in each item
+ *
+ * @return	the list of all files in the given directory matching the given file type.
+ * 		The list must be destroyed using bctbx_list_free_with_data(<returned list>, bctbx_free)
+ **/
+BCTBX_PUBLIC struct _bctbx_list *bctbx_parse_directory(const char *path, const char *file_type);
+
+/**
+ * Create a directory
+ * Note: parent directory must exists, this function cannot create a complete path
+ *
+ * @param[in]	path	the directory to create
+ *
+ * @return 0 on success
+ **/
+BCTBX_PUBLIC int bctbx_mkdir(const char *path);
+
+/**
+ * Delete a directory
+ *
+ * @param[in]	path		the directory to delete
+ * @param[in]	recursive	if false, the directory must be empty to be deleted otherwise recursively delete with all content
+ *
+ * @return 0 on success
+ **/
+BCTBX_PUBLIC int bctbx_rmdir(const char *path, bool_t recursive);
+
 
 /**
  * @brief return a timeSpec structure(sec and nsec) containing current time(WARNING: there is no guarantees it is UTC ).
@@ -480,6 +618,12 @@ BCTBX_PUBLIC void bctbx_timespec_add(bctoolboxTimeSpec *ts, const int64_t lap);
  */
 BCTBX_PUBLIC uint32_t bctbx_time_string_to_sec(const char *timeString);
 
+
+/**
+ * Generate a non cryptographically usable alea
+ *
+ * @return a 32 bits unsigned random. DO NOT USE THIS RANDOM SOURCE FOR ANY CRYPTOGRAPHIC OPERATION
+ */
 BCTBX_PUBLIC unsigned int bctbx_random(void);
 
 
@@ -505,7 +649,7 @@ BCTBX_PUBLIC int bctbx_sockaddr_to_printable_ip_address(struct sockaddr *sa, soc
  -V4.
 **/
 BCTBX_PUBLIC struct addrinfo *bctbx_addrinfo_sort(struct addrinfo *ai);
-	
+
 
 /**
  * Convert a numeric ip address and port into an addrinfo, whose family will be as specified in the first argument.
@@ -575,6 +719,7 @@ typedef int bctbx_pipe_t;
 #define BCTBX_PIPE_INVALID (-1)
 #endif
 
+BCTBX_PUBLIC bctbx_pipe_t bctbx_server_pipe_create_by_path(const char *path);
 BCTBX_PUBLIC bctbx_pipe_t bctbx_server_pipe_create(const char *name);
 /*
  * warning: on win32 bctbx_server_pipe_accept_client() might return INVALID_HANDLE_VALUE without
@@ -651,7 +796,7 @@ BCTBX_PUBLIC void bctbx_uint32_to_str(uint8_t output_string[9], uint32_t input_u
  *
  * Note : there is no check on the length or validity as an hexa string on the input, incorrect byte is silently mapped to 0
  */
-BCTBX_PUBLIC uint32_t bctbx_str_to_uint32(const uint8_t input_string[9]);
+BCTBX_PUBLIC uint32_t bctbx_str_to_uint32(const uint8_t *input_string);
 
 /**
  * @brief Convert an unsigned 64 bits integer into the corresponding hexadecimal string(including null termination character)
@@ -669,6 +814,40 @@ BCTBX_PUBLIC void bctbx_uint64_to_str(uint8_t output_string[17], uint64_t input_
  * Note : there is no check on the length or validity as an hexa string on the input, incorrect byte is silently mapped to 0
  */
 BCTBX_PUBLIC uint64_t bctbx_str_to_uint64(const uint8_t input_string[17]);
+
+/**
+ * @brief Call of strcasecmp where parameters can be NULL.
+ *
+ * @param[in] a first string to compare. @maybenil
+ * @param[in] b second string to compare. @maybenil
+ *
+ *@return the value of strcasecmp.
+ */
+BCTBX_PUBLIC int bctbx_strcasecmp(const char *a, const char *b);
+
+/**
+ * @brief Call of strcmp where parameters can be NULL.
+ *
+ * @param[in] a first string to compare. @maybenil
+ * @param[in] b second string to compare. @maybenil
+ *
+ *@return the value of strcmp.
+ */
+BCTBX_PUBLIC int bctbx_strcmp(const char *a, const char *b);
+
+/**
+ * @brief Set the name of the calling thread.
+ * This can ease the analysis of bug reports, such as ANR reports on Android.
+ * @param[in] the name. Its length is subject to underlying platform's limitations.
+ */
+BCTBX_PUBLIC void bctbx_set_self_thread_name(const char *name);
+
+/**
+ * @brief Set handlers to catch exceptions and write the stack trace into log. Available for Windows.
+ * It keeps old handlers.
+ * @param[in] if TRUE, prepends handlers with bctoolbox hooks. If FALSE, remove them and replace by old hooks (stored from the last call of bctbx_set_stack_trace_hooks() ). By default, it is FALSE.
+ */
+BCTBX_PUBLIC void bctbx_set_stack_trace_hooks(bool_t use_bctbx_hooks);
 
 #ifdef __cplusplus
 }

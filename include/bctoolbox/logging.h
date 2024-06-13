@@ -258,6 +258,7 @@ void bctbx_qnx_log_handler(const char *domain, BctbxLogLevel lev, const char *fm
 #include <string>
 #include <iostream>
 #include <sstream>
+#include <iomanip>
 
 #if !defined(_WIN32) && !defined(__QNX__)
 #include <syslog.h>
@@ -305,39 +306,62 @@ namespace bctoolbox {
 
 #include <ostream>
 
-class pumpstream : public std::ostringstream {
+class pumpstream {
 public:
-	/*contructor used to disable logging*/
-	pumpstream():mDomain(""),mLevel(BCTBX_LOG_DEBUG),mTraceEnabled(false){}
-	pumpstream(const char *domain, BctbxLogLevel level) : mDomain(domain ? domain : ""), mLevel(level),mTraceEnabled(true) {}
-	~pumpstream() {
-		const char *domain = mDomain.empty() ? NULL : mDomain.c_str();
-		if (mTraceEnabled && bctbx_log_level_enabled(domain, mLevel))
-			bctbx_log(domain, mLevel, "%s", str().c_str());
+	/* This constructor assumes that "domain" remains valid, which is a reasonable assumption because the pumpstream
+	 * is used through macros (below) where the usage is within single line of code. */
+	pumpstream(const char *domain, BctbxLogLevel level) : mDomain(domain), mLevel(level){
+#ifndef BCTBX_DEBUG_MODE
+		/* If debug mode is not enabled, the pumpstream shall do nothing if level requested is BCTBX_LOG_DEBUG.
+		 * bctbx_log_level_enabled() does not even need to be called. */
+		if (level == BCTBX_LOG_DEBUG) {
+			mIslogLevelEnabled = false;
+			return;
+		}
+#endif
+		mIslogLevelEnabled = bctbx_log_level_enabled(domain, mLevel);
 	}
 
+	~pumpstream() {
+		if (mIslogLevelEnabled)
+			bctbx_log(mDomain, mLevel, "%s", mOstringstream.str().c_str());
+	}
+
+	template <typename _Tp> friend pumpstream& operator<<(pumpstream& __os, _Tp&& __x);
+	template <typename _Tp> friend pumpstream& operator<<(pumpstream&& __os, _Tp&& __x);
+	friend pumpstream& operator<<(pumpstream& __os, std::ostream& (*pf)(std::ostream&));
+
 private:
-	const std::string mDomain;
+	std::ostringstream mOstringstream{};
+	bool mIslogLevelEnabled = false;
+	const char* mDomain;
 	const BctbxLogLevel mLevel;
-	const bool mTraceEnabled;
 };
 
-
-#if (__GNUC__ == 4 && __GNUC_MINOR__ < 5 && __cplusplus > 199711L)
-template <typename _Tp> inline pumpstream &operator<<(pumpstream &&__os, const _Tp &__x) {
-	(static_cast<std::ostringstream &>(__os)) << __x;
-	return __os;
+inline pumpstream& operator<<(pumpstream& pumpStream, std::ostream& (*pf)(std::ostream&)) {
+	if(pumpStream.mIslogLevelEnabled) {
+		pumpStream.mOstringstream << pf;
+	}
+    return pumpStream;
 }
-#endif
+
+template <typename T> inline pumpstream& operator<<(pumpstream& pumpStream, T&& x) {
+    if(pumpStream.mIslogLevelEnabled) {
+		pumpStream.mOstringstream << std::forward<T>(x);
+	}
+	return pumpStream;
+}
+
+template <typename T> inline pumpstream& operator<<(pumpstream&& pumpStream, T&& x) {
+    if(pumpStream.mIslogLevelEnabled) {
+		pumpStream.mOstringstream << std::forward<T>(x);
+	}
+	return pumpStream;
+}
 
 #define BCTBX_SLOG(domain, thelevel) pumpstream(domain, thelevel)
 
-#ifndef BCTBX_DEBUG_MODE
 #define BCTBX_SLOGD BCTBX_SLOG(BCTBX_LOG_DOMAIN, BCTBX_LOG_DEBUG)
-#else
-#define BCTBX_SLOGD pumpstream()
-#endif
-
 #define BCTBX_SLOGI BCTBX_SLOG(BCTBX_LOG_DOMAIN, BCTBX_LOG_MESSAGE)
 #define BCTBX_SLOGW BCTBX_SLOG(BCTBX_LOG_DOMAIN, BCTBX_LOG_WARNING)
 #define BCTBX_SLOGE BCTBX_SLOG(BCTBX_LOG_DOMAIN, BCTBX_LOG_ERROR)

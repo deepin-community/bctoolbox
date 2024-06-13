@@ -54,6 +54,8 @@
 
 #define BCTBX_VFS_ERROR       -255   /* Some kind of disk I/O error occurred */
 
+#define BCTBX_VFS_PRINTF_PAGE_SIZE 4096 /* Size of the page hold in memory by fprintf */
+#define BCTBX_VFS_GETLINE_PAGE_SIZE 17385 /* Size of the page hold in memory by getnextline */
 
 #ifdef __cplusplus
 extern "C"{
@@ -73,9 +75,16 @@ struct bctbx_vfs_file_t {
 	const struct bctbx_io_methods_t *pMethods;  /* Methods for an open file: all Developpers must supply this field at open step*/
 	/*the fields below are used by the default implementation. Developpers are not required to supply them, but may use them if they find
 	 * them useful*/
-	void* pUserData; 				/*Developpers can store private data under this pointer */
-	int fd;                         /* File descriptor */
-	off_t offset;					/*File offset used by lseek*/
+	void* pUserData; 				/* Developpers can store private data under this pointer */
+	off_t offset;					/* File offset used by bctbx_file_fprintf and bctbx_file_get_nxtline */
+	/* fprintf cache */
+	char fPage[BCTBX_VFS_PRINTF_PAGE_SIZE];		/* Buffer storing the current page cached by fprintf */
+	off_t fPageOffset;				/* The original offset of the cached page */
+	size_t fSize;					/* number of bytes in cache */
+	/* get_nxtline cache */
+	char gPage[BCTBX_VFS_GETLINE_PAGE_SIZE+1];	/* Buffer storing the current page cachec by get_nxtline +1 to hold the \0 */
+	off_t gPageOffset;				/* The offset of the cached page */
+	size_t gSize;					/* actual size of the data in cache */
 };
 
 
@@ -87,8 +96,9 @@ struct bctbx_io_methods_t {
 	ssize_t (*pFuncWrite)(bctbx_vfs_file_t *pFile, const void* buf, size_t count, off_t offset);
 	int (*pFuncTruncate)(bctbx_vfs_file_t *pFile, int64_t size);
 	int64_t (*pFuncFileSize)(bctbx_vfs_file_t *pFile);
+	int (*pFuncSync)(bctbx_vfs_file_t *pFile);
 	int (*pFuncGetLineFromFd)(bctbx_vfs_file_t *pFile, char* s, int count);
-	off_t (*pFuncSeek)(bctbx_vfs_file_t *pFile, off_t offset, int whence);
+	bool_t (*pFuncIsEncrypted)(bctbx_vfs_file_t *pFile);
 };
 
 
@@ -101,14 +111,6 @@ struct bctbx_vfs_t {
 	int (*pFuncOpen)(bctbx_vfs_t *pVfs, bctbx_vfs_file_t *pFile, const char *fName, int openFlags);
 };
 
-
-/* API to use the VFS */
-/*
- * This function returns a pointer to the VFS implemented in this file.
- */
-BCTBX_PUBLIC bctbx_vfs_t *bc_create_vfs(void);
-
-
 /**
  * Attempts to read count bytes from the open file given by pFile, at the position starting at offset
  * in the file and and puts them in the buffer pointed by buf.
@@ -119,6 +121,17 @@ BCTBX_PUBLIC bctbx_vfs_t *bc_create_vfs(void);
  * @return        Number of bytes read on success, BCTBX_VFS_ERROR otherwise.
  */
 BCTBX_PUBLIC ssize_t bctbx_file_read(bctbx_vfs_file_t *pFile, void *buf, size_t count, off_t offset);
+
+/**
+ * Attempts to read count bytes from the open file given by pFile, at the position starting at its offset
+ * in the file and and puts them in the buffer pointed by buf.
+ * The file offset shall be incremented by the number of bytes actually read.
+ * @param  pFile  bctbx_vfs_file_t File handle pointer.
+ * @param  buf    Buffer holding the read bytes.
+ * @param  count  Number of bytes to read.
+ * @return        Number of bytes read on success, BCTBX_VFS_ERROR otherwise.
+ */
+BCTBX_PUBLIC ssize_t bctbx_file_read2(bctbx_vfs_file_t *pFile, void *buf, size_t count);
 
 /**
  * Close the file from its descriptor pointed by thw bctbx_vfs_file_t handle.
@@ -177,6 +190,17 @@ BCTBX_PUBLIC int bctbx_file_truncate(bctbx_vfs_file_t *pFile, int64_t size);
 BCTBX_PUBLIC ssize_t bctbx_file_write(bctbx_vfs_file_t *pFile, const void *buf, size_t count, off_t offset);
 
 /**
+ * Write count bytes contained in buf to a file associated with pFile at the position starting at its
+ * offset. Calls pFuncWrite (set to bc_Write by default).
+ * The file offset shall be incremented by the number of bytes actually written.
+ * @param  pFile 	File handle pointer.
+ * @param  buf    	Buffer hodling the values to write.
+ * @param  count  	Number of bytes to write to the file.
+ * @return        	Number of bytes written on success, BCTBX_VFS_ERROR if an error occurred.
+ */
+BCTBX_PUBLIC ssize_t bctbx_file_write2(bctbx_vfs_file_t *pFile, const void *buf, size_t count);
+
+/**
  * Writes to file.
  * @param  pFile  File handle pointer.
  * @param  offset where to write in the file
@@ -196,7 +220,16 @@ BCTBX_PUBLIC ssize_t bctbx_file_fprintf(bctbx_vfs_file_t *pFile, off_t offset, c
 BCTBX_PUBLIC int bctbx_file_get_nxtline(bctbx_vfs_file_t *pFile, char *s, int maxlen);
 
 /**
- * Wrapper to pFuncSeek VFS method call. Set the position to offset in the file.
+ * Simply sync the file contents given through the file handle
+ * to the persistent media.
+ * @param  pFile  File handle pointer.
+ * @return   BCTBX_VFS_OK on success, BCTBX_VFS_ERROR otherwise
+ */
+BCTBX_PUBLIC int bctbx_file_sync(bctbx_vfs_file_t *pFile);
+
+/**
+ * Set the position to offset in the file, this position is used only by the function
+ * bctbx_file_get_nxtline. Read and write give their own offset as param and won't modify this one
  * @param  pFile  File handle pointer.
  * @param  offset File offset where to set the position to.
  * @param  whence Either SEEK_SET, SEEK_CUR,SEEK_END
@@ -204,6 +237,12 @@ BCTBX_PUBLIC int bctbx_file_get_nxtline(bctbx_vfs_file_t *pFile, char *s, int ma
  */
 BCTBX_PUBLIC off_t bctbx_file_seek(bctbx_vfs_file_t *pFile, off_t offset, int whence);
 
+/**
+ * Get the file encryption status
+ * @param  pFile  File handle pointer.
+ * @return true if the file is encrypted
+ */
+BCTBX_PUBLIC bool_t bctbx_file_is_encrypted(bctbx_vfs_file_t *pFile);
 
 /**
  * Set default VFS pointer pDefault to my_vfs.

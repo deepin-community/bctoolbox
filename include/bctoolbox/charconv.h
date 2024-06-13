@@ -38,7 +38,7 @@ BCTBX_PUBLIC void bctbx_set_default_encoding (const char *encoding);
  *
  * @return a pointer to a null-terminated string containing the default encoding.
  */
-BCTBX_PUBLIC const char *bctbx_get_default_encoding ();
+BCTBX_PUBLIC const char *bctbx_get_default_encoding (void);
 
 /**
  * @brief Convert the given string from system locale to UTF8.
@@ -73,6 +73,27 @@ BCTBX_PUBLIC char *bctbx_utf8_to_locale (const char *str);
  * @note If encoding is UTF-8 then it returns a copy of str
  */
 BCTBX_PUBLIC char *bctbx_convert_any_to_utf8 (const char *str, const char *encoding);
+
+/**
+ * @brief Convert the char string to wide char string. Only available for Windows platform
+ *
+ * @param[in] str string to convert
+ *
+ * @return a pointer to a null-terminated string containing the converted string. This buffer must then be freed
+ * by caller. NULL on failure.
+ */
+BCTBX_PUBLIC wchar_t* bctbx_string_to_wide_string(const char* s);
+
+/**
+ * @brief Return the code page from the encoding. Only available for Windows platform
+ *
+ * @param[in] encoding string to convert. If NULL or "", return the code page defined by bctbx_get_default_encoding(). @maybenil
+ *
+ * @return The code page associated to the encoding. Return system's locale if not found.
+ */
+BCTBX_PUBLIC unsigned int bctbx_get_code_page(const char* encoding);
+
+
 
 #ifdef __cplusplus
 }

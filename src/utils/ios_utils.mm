@@ -19,6 +19,8 @@
 
 #ifdef __APPLE__
 
+#include <TargetConditionals.h>
+
 #import <Foundation/Foundation.h>
 #include <dlfcn.h>
 
@@ -26,6 +28,11 @@
 #include "bctoolbox/exception.hh"
 #include "bctoolbox/logging.h"
 #include "ios_utils_stub.hh"
+
+#if TARGET_OS_IPHONE
+#import <UIKit/UIKit.h>
+#endif
+
 
 namespace bctoolbox {
 
@@ -40,7 +47,8 @@ IOSUtils& IOSUtils::getUtils() {
 }
 
 IOSUtils::IOSUtils() {
-    if (isApp()) {
+	mIsApp = [[[NSBundle mainBundle] bundlePath] hasSuffix:@".app"];
+    if (mIsApp) {
         openDynamicLib();
         using create_t = IOSUtilsInterface *(*)();
         auto createUtils = reinterpret_cast<create_t>(loadSymbol("bctbx_create_ios_utils_app"));
@@ -51,7 +59,7 @@ IOSUtils::IOSUtils() {
 }
 
 IOSUtils::~IOSUtils() {
-    if (isApp()) {
+    if (mIsApp) {
         using destroy_t = void (*)(IOSUtilsInterface *);
         auto destroyUtils = reinterpret_cast<destroy_t>(loadSymbol("bctbx_destroy_ios_utils_app"));
         destroyUtils(mUtils);
@@ -62,7 +70,7 @@ IOSUtils::~IOSUtils() {
 }
 
 bool IOSUtils::isApp() {
-    return [[[NSBundle mainBundle] bundlePath] hasSuffix:@".app"];
+    return mIsApp;
 }
 
 void IOSUtils::openDynamicLib() {
@@ -101,6 +109,16 @@ void IOSUtils::endBackgroundTask(unsigned long id) {
 
 bool IOSUtils::isApplicationStateActive() {
     return mUtils->isApplicationStateActive();
+}
+
+int IOSUtils::getOSMajorVersion() const{
+#if TARGET_OS_IPHONE
+    NSArray *versionCompatibility = [[UIDevice currentDevice].systemVersion componentsSeparatedByString:@"."];
+	return [[versionCompatibility objectAtIndex:0] intValue];
+#else
+	bctbx_error("IOSUtils::getOSMajorVersion() not running on iOS");
+	return 0;
+#endif
 }
 
 

@@ -46,19 +46,6 @@ int bctbx_crypto_have_ecc(void) {
 	return TRUE;
 }
 
-/**
- * @brief Return a 32 bits unsigned integer, each bit set to one matches an
- * available key agreement algorithm as defined in bctoolbox/include/crypto.h
- *
- * This function is implemented in ecc.c as all other backend crypto libraries
- * (polarssl-1.2, polarssl-1.3/1.4, mbedtls implement DHM2048 and DHM3072
- *
- * @return An unsigned integer of 32 flags matching key agreement algos
- */
-uint32_t bctbx_key_agreement_algo_list(void) {
-	return BCTBX_DHM_2048|BCTBX_DHM_3072|BCTBX_ECDH_X25519|BCTBX_ECDH_X448;
-}
-
 /*****************************************************************************/
 /*** Elliptic Curve Diffie-Hellman - ECDH                                  ***/
 /*****************************************************************************/
@@ -140,7 +127,7 @@ void bctbx_ECDHSetSelfPublicKey(bctbx_ECDHContext_t *context, const uint8_t *sel
  * @param[in]		peerPublic		The buffer holding the peer public key, is duplicated in the ECDH context
  * @param[in]		peerPublicLength	Length of previous buffer, must match the algo type setted at context creation
  */
-BCTBX_PUBLIC void bctbx_ECDHSetPeerPublicKey(bctbx_ECDHContext_t *context, const uint8_t *peerPublic, const size_t peerPublicLength) {
+void bctbx_ECDHSetPeerPublicKey(bctbx_ECDHContext_t *context, const uint8_t *peerPublic, const size_t peerPublicLength) {
 	if (context!=NULL && context->pointCoordinateLength==peerPublicLength) {
 		/* allocate public key buffer if needed */
 		if (context->peerPublic == NULL) {
@@ -348,14 +335,20 @@ void bctbx_EDDSA_sign(bctbx_EDDSAContext_t *context, const uint8_t *message, con
 		switch (context->algo) {
 			case BCTBX_EDDSA_25519:
 				if (*signatureLength>=DECAF_EDDSA_25519_SIGNATURE_BYTES) { /* check the buffer is large enough to hold the signature */
-					decaf_ed25519_sign ( signature, context->secretKey, context->publicKey, message, messageLength, 0, associatedData, associatedDataLength);
+					decaf_eddsa_25519_keypair_t keypair;
+					decaf_ed25519_derive_keypair(keypair, context->secretKey);
+					decaf_ed25519_keypair_sign ( signature, keypair, message, messageLength, 0, associatedData, associatedDataLength);
+					decaf_ed25519_keypair_destroy(keypair);
 					*signatureLength=DECAF_EDDSA_25519_SIGNATURE_BYTES;
 					return;
 				}
 				break;
 			case BCTBX_EDDSA_448:
 				if (*signatureLength>=DECAF_EDDSA_448_SIGNATURE_BYTES) { /* check the buffer is large enough to hold the signature */
-					decaf_ed448_sign ( signature, context->secretKey, context->publicKey, message, messageLength, 0, associatedData, associatedDataLength); 
+					decaf_eddsa_448_keypair_t keypair;
+					decaf_ed448_derive_keypair(keypair, context->secretKey);
+					decaf_ed448_keypair_sign ( signature, keypair, message, messageLength, 0, associatedData, associatedDataLength);
+					decaf_ed448_keypair_destroy(keypair);
 					*signatureLength=DECAF_EDDSA_448_SIGNATURE_BYTES;
 					return;
 				}
@@ -514,12 +507,6 @@ void bctbx_EDDSA_ECDH_publicKeyConversion(const bctbx_EDDSAContext_t *ed, bctbx_
 }
 
 #else /* HAVE_DECAF */
- /* This function is implemented in ecc.c as all other backend crypto libraries
- * (polarssl-1.2, polarssl-1.3/1.4, mbedtls implement DHM2048 and DHM3072
- */
-uint32_t bctbx_key_agreement_algo_list(void) {
-	return BCTBX_DHM_2048|BCTBX_DHM_3072;
-}
 
 /* We do not have lib decaf, implement empty stubs */
 int bctbx_crypto_have_ecc(void) { return FALSE;}

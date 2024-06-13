@@ -1,3 +1,0 @@
-- Fix useless dependency problem detected by dpkg-shlibdeps
-- Figure out where cmake bits should go
-- debhelper is running autoreconf even with --buildsystem=cmake due to #844504

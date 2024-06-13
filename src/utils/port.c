@@ -26,10 +26,16 @@
 #include "bctoolbox/port.h"
 #include "bctoolbox/vconnect.h"
 #include "bctoolbox/list.h"
+#include "bctoolbox/charconv.h"
 #include "utils.h"
+
+#ifdef __APPLE__
+   #include "TargetConditionals.h"
+#endif
 
 #if	defined(_WIN32) && !defined(_WIN32_WCE)
 #include <process.h>
+#include <processthreadsapi.h>
 #endif
 
 #ifdef _MSC_VER
@@ -38,8 +44,18 @@
 #endif
 #endif
 
+#ifndef _WIN32
+#include <dirent.h> /* available on POSIX system only */
+#else
+#include <direct.h>
+#endif
+
 #ifdef HAVE_SYS_SHM_H
 #include <sys/shm.h>
+#endif
+
+#ifdef __linux__
+#include <sys/prctl.h>
 #endif
 
 #ifndef MIN
@@ -110,7 +126,7 @@ char * bctbx_strdup(const char *tmp){
 char * bctbx_dirname(const char *path) {
 	char *ptr = strrchr(path, '/');
 	if (ptr == NULL) ptr = strrchr(path, '\\');
-	return ptr ? bctbx_strndup(path, ptr-path) : bctbx_strdup(".");
+	return ptr ? bctbx_strndup(path, (int) (ptr-path)) : bctbx_strdup(".");
 }
 
 char * bctbx_basename(const char *path) {
@@ -147,6 +163,152 @@ bool_t bctbx_directory_exists(const char *pathname) {
 #else
 	return stat(pathname, &sb) == 0 && S_ISDIR(sb.st_mode);
 #endif
+}
+
+bctbx_list_t *bctbx_parse_directory(const char *path, const char *file_type) {
+	bctbx_list_t* file_list = NULL;
+#ifdef _WIN32
+	WIN32_FIND_DATA FileData;
+	HANDLE hSearch;
+	BOOL fFinished = FALSE;
+	char szDirPath[1024];
+#ifdef UNICODE
+	wchar_t wszDirPath[1024];
+#endif
+
+	if (file_type == NULL) {
+		file_type = ".*";
+	}
+	snprintf(szDirPath, sizeof(szDirPath), "%s\\*%s", path, file_type);
+#ifdef UNICODE
+	mbstowcs(wszDirPath, szDirPath, sizeof(wszDirPath));
+	hSearch = FindFirstFileExW(wszDirPath, FindExInfoStandard, &FileData, FindExSearchNameMatch, NULL, 0);
+#else
+	hSearch = FindFirstFileExA(szDirPath, FindExInfoStandard, &FileData, FindExSearchNameMatch, NULL, 0);
+#endif
+	if (hSearch == INVALID_HANDLE_VALUE) {
+		bctbx_message("No file (*%s) found in [%s] [%d].", file_type, szDirPath, (int)GetLastError());
+		return NULL;
+	}
+	snprintf(szDirPath, sizeof(szDirPath), "%s", path);
+	while (!fFinished) {
+		char szFilePath[1024];
+		// ignore . and ..
+		if (!(FileData.cFileName[0] == '.'
+			&& (	(FileData.cFileName[1] == '\0')
+				|| (FileData.cFileName[1] == '.' && FileData.cFileName[2] == '\0')))) {
+#ifdef UNICODE
+			char filename[512];
+			wcstombs(filename, FileData.cFileName, sizeof(filename));
+			snprintf(szFilePath, sizeof(szFilePath), "%s\\%s", szDirPath, filename);
+#else
+			snprintf(szFilePath, sizeof(szFilePath), "%s\\%s", szDirPath, FileData.cFileName);
+#endif
+			file_list = bctbx_list_append(file_list, bctbx_strdup(szFilePath));
+		}
+		if (!FindNextFile(hSearch, &FileData)) {
+			if (GetLastError() == ERROR_NO_MORE_FILES) {
+				fFinished = TRUE;
+			}
+			else {
+				bctbx_error("Couldn't find next (*%s) file.", file_type);
+				fFinished = TRUE;
+			}
+		}
+	}
+	/* Close the search handle. */
+	FindClose(hSearch);
+#else
+	DIR *dir;
+	struct dirent *ent;
+
+	if ((dir = opendir(path)) == NULL) {
+		bctbx_error("Could't open [%s] directory.", path);
+		return NULL;
+	}
+
+	/* loop on all directory files */
+	errno = 0;
+	ent = readdir(dir);
+	while (ent != NULL) {
+		/* filter on file type if given */
+		if (file_type==NULL
+			|| (strncmp(ent->d_name+strlen(ent->d_name)-strlen(file_type), file_type, strlen(file_type))==0) ) {
+			/* ignore . and .. */
+			if (!(ent->d_name[0] == '.'
+				&& ((ent->d_name[1]=='.' && ent->d_name[2]=='\0')
+					|| ent->d_name[1]=='\0'))) {
+				char *name_with_path=bctbx_strdup_printf("%s/%s",path,ent->d_name);
+				file_list = bctbx_list_append(file_list, name_with_path);
+			}
+		}
+		ent = readdir(dir);
+	}
+	if (errno != 0) {
+		bctbx_error("Error while reading the [%s] directory: %s.", path, strerror(errno));
+	}
+	closedir(dir);
+#endif
+	return file_list;
+}
+
+int bctbx_mkdir(const char *path) {
+#ifdef _WIN32
+	return _mkdir(path);
+#else
+	return mkdir(path, 0700);
+#endif
+};
+
+/**
+ * delete empty directory only
+ *
+ * @param[in]	path		the directory to delete
+ *
+ * @return 0 on success
+ */
+static int bctbx_rmemptydir(const char *path) {
+#ifdef _WIN32
+	return _rmdir(path);
+#else
+	return rmdir(path);
+#endif
+};
+
+/**
+ * Callback used to delete files from parsed list in directory
+ * @param[in] v_path	the path of the file or dir to delete, it shall never be . or ..
+ * 			it should be the case as the list was obtained using bctbx_parse_directory
+ *
+ */
+static void bctbx_removeFileFromList(void *v_path) {
+	char *path = (char *)v_path;
+
+	// if path is a directory, recurse in it
+	if (bctbx_directory_exists(path)) {
+		bctbx_rmdir(path, TRUE);
+	} else {
+		remove(path);
+	}
+}
+
+int bctbx_rmdir(const char *path, bool_t recursive) {
+	if (recursive == FALSE) {
+		return bctbx_rmemptydir(path);
+	}
+
+	// check the directory exists
+	if (!bctbx_directory_exists(path)) {
+		return -1;
+	}
+
+	// get all files from directory and delete them
+	bctbx_list_t *fileList = bctbx_parse_directory(path, NULL);
+	bctbx_list_for_each(fileList, bctbx_removeFileFromList);
+	bctbx_list_free_with_data(fileList, bctbx_free);
+
+	// directory is now empty, delete it
+	return bctbx_rmemptydir(path);
 }
 
 #if	!defined(_WIN32) && !defined(_WIN32_WCE)
@@ -203,6 +365,16 @@ unsigned long __bctbx_thread_self(void) {
 	return (unsigned long)pthread_self();
 }
 
+void bctbx_set_self_thread_name(const char *name){
+#ifdef __linux__ /* Android, Gnu/Linux */
+	prctl(PR_SET_NAME, name, NULL, NULL, NULL);
+#elif TARGET_OS_MAC
+	pthread_setname_np(name);
+#elif
+	bctbx_warning("bctbx_set_self_thread_name(): not implemented on this platform.");
+#endif
+}
+
 #endif
 #if	defined(_WIN32) || defined(_WIN32_WCE)
 
@@ -242,6 +414,12 @@ int __bctbx_WIN_mutex_destroy(bctbx_mutex_t * hMutex)
 	CloseHandle(*hMutex);
 #endif
 	return 0;
+}
+
+void bctbx_set_self_thread_name(const char *name){
+	wchar_t *unicode_name = bctbx_string_to_wide_string(name);
+	SetThreadDescription(GetCurrentThread(), unicode_name);
+	bctbx_free(unicode_name);
 }
 
 typedef struct thread_param{
@@ -403,9 +581,10 @@ static char *make_pipe_name(const char *name){
 }
 
 /* portable named pipes */
-bctbx_socket_t bctbx_server_pipe_create(const char *name){
+
+bctbx_socket_t bctbx_server_pipe_create_by_path(const char *path){
 	struct sockaddr_un sa;
-	char *pipename=make_pipe_name(name);
+	char *pipename=bctbx_strdup(path);
 	bctbx_socket_t sock;
 	sock=socket(AF_UNIX,SOCK_STREAM,0);
 	sa.sun_family=AF_UNIX;
@@ -419,6 +598,10 @@ bctbx_socket_t bctbx_server_pipe_create(const char *name){
 	}
 	listen(sock,1);
 	return sock;
+}
+
+bctbx_socket_t bctbx_server_pipe_create(const char *name){
+	return bctbx_server_pipe_create_by_path(make_pipe_name(name));
 }
 
 bctbx_socket_t bctbx_server_pipe_accept_client(bctbx_socket_t server){
@@ -513,13 +696,19 @@ static char *make_pipe_name(const char *name){
 
 static HANDLE event=NULL;
 
-/* portable named pipes */
-bctbx_pipe_t bctbx_server_pipe_create(const char *name){
+bctbx_pipe_t bctbx_server_pipe_create_by_path(const char *path){
 #ifdef BCTBX_WINDOWS_DESKTOP
 	bctbx_pipe_t h;
-	char *pipename=make_pipe_name(name);
+	char *pipename=bctbx_strdup(path);
+#ifdef BCTBX_WINDOWS_UWP
+	wchar_t * wPipename = bctbx_string_to_wide_string(pipename);
+	h=CreateNamedPipe(wPipename,PIPE_ACCESS_DUPLEX|FILE_FLAG_OVERLAPPED,PIPE_TYPE_MESSAGE|PIPE_WAIT,1,
+						32768,32768,0,NULL);
+	bctbx_free(wPipename);
+#else
 	h=CreateNamedPipe(pipename,PIPE_ACCESS_DUPLEX|FILE_FLAG_OVERLAPPED,PIPE_TYPE_MESSAGE|PIPE_WAIT,1,
 						32768,32768,0,NULL);
+#endif
 	bctbx_free(pipename);
 	if (h==INVALID_HANDLE_VALUE){
 		bctbx_error("Fail to create named pipe %s",pipename);
@@ -532,6 +721,9 @@ bctbx_pipe_t bctbx_server_pipe_create(const char *name){
 #endif
 }
 
+bctbx_pipe_t bctbx_server_pipe_create(const char *name){
+	return bctbx_server_pipe_create_by_path(make_pipe_name(name));
+}
 
 /*this function is a bit complex because we need to wakeup someday
 even if nobody connects to the pipe.
@@ -581,7 +773,7 @@ int bctbx_server_pipe_close(bctbx_pipe_t spipe){
 }
 
 bctbx_pipe_t bctbx_client_pipe_connect(const char *name){
-#ifdef BCTBX_WINDOWS_DESKTOP
+#if defined(BCTBX_WINDOWS_DESKTOP)  && !defined(BCTBX_WINDOWS_UWP)
 	char *pipename=make_pipe_name(name);
 	bctbx_pipe_t hpipe = CreateFile(
 		 pipename,   // pipe name
@@ -632,10 +824,16 @@ static bctbx_list_t *maplist=NULL;
 void *bctbx_shm_open(unsigned int keyid, int size, int create){
 #ifdef BCTBX_WINDOWS_DESKTOP
 	HANDLE h;
-	char name[64];
 	void *buf;
-
+#ifdef BCTBX_WINDOWS_UWP
+	char nameBuf[64];
+	snprintf(nameBuf,sizeof(nameBuf),"%x",keyid);
+	wchar_t * name = bctbx_string_to_wide_string(nameBuf);
+#else
+	char name[64];
 	snprintf(name,sizeof(name),"%x",keyid);
+#endif
+
 	if (create){
 		h = CreateFileMapping(
 			INVALID_HANDLE_VALUE,    // use paging file
@@ -668,6 +866,9 @@ void *bctbx_shm_open(unsigned int keyid, int size, int create){
 		CloseHandle(h);
 		bctbx_error("MapViewOfFile failed");
 	}
+#ifdef BCTBX_WINDOWS_UWP
+	bctbx_free(name);
+#endif
 	return buf;
 #else
 	bctbx_error("%s not supported!", __FUNCTION__);
@@ -705,7 +906,7 @@ void bctbx_shm_close(void *mem){
 
 void _bctbx_get_cur_time(bctoolboxTimeSpec *ret, bool_t realtime){
 #if defined(_WIN32_WCE) || defined(WIN32)
-#if defined(BCTBX_WINDOWS_DESKTOP) && !defined(ENABLE_MICROSOFT_STORE_APP)
+#if defined(BCTBX_WINDOWS_DESKTOP) && !defined(ENABLE_MICROSOFT_STORE_APP) && !defined(BCTBX_WINDOWS_UWP)
 	DWORD timemillis;
 #	if defined(_WIN32_WCE)
 	timemillis=GetTickCount();
@@ -774,7 +975,7 @@ void bctbx_sleep_ms(int ms){
 }
 
 void bctbx_sleep_until(const bctoolboxTimeSpec *ts){
-#ifdef __linux
+#ifdef __linux__
 	struct timespec rq;
 	rq.tv_sec=ts->tv_sec;
 	rq.tv_nsec=ts->tv_nsec;
@@ -935,7 +1136,7 @@ char* strtok_r(char *str, const char *delim, char **nextp){
 static int bctbx_wincrypto_random(unsigned int *rand_number){
 	static HCRYPTPROV hProv=(HCRYPTPROV)-1;
 	static int initd=0;
-	
+
 	if (!initd){
 		if (!CryptAcquireContext(&hProv,NULL,NULL,PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)){
 			bctbx_error("bctbx_wincrypto_random(): Could not acquire a windows crypto context");
@@ -945,7 +1146,7 @@ static int bctbx_wincrypto_random(unsigned int *rand_number){
 	}
 	if (hProv==(HCRYPTPROV)-1)
 		return -1;
-	
+
 	if (!CryptGenRandom(hProv,4,(BYTE*)rand_number)){
 		bctbx_error("bctbx_wincrypto_random(): CryptGenRandom() failed.");
 		return -1;
@@ -955,7 +1156,7 @@ static int bctbx_wincrypto_random(unsigned int *rand_number){
 #endif
 
 unsigned int bctbx_random(void){
-#if defined(__linux) || defined(__APPLE__)
+#if defined(__linux__) || defined(__APPLE__)
 	static int fd=-1;
 	if (fd==-1) fd=open("/dev/urandom",O_RDONLY);
 	if (fd!=-1){
@@ -974,7 +1175,7 @@ unsigned int bctbx_random(void){
 	unsigned int ret;
 #ifdef _MSC_VER
 	/*rand_s() is pretty nice and simple function but is not wrapped by mingw.*/
-	
+
 	if (rand_s(&ret)==0){
 		return ret;
 	}
@@ -1000,7 +1201,7 @@ unsigned int bctbx_random(void){
 }
 
 bool_t bctbx_is_multicast_addr(const struct sockaddr *addr) {
-	
+
 	switch (addr->sa_family) {
 		case AF_INET:
 			return IN_MULTICAST(ntohl(((struct sockaddr_in *) addr)->sin_addr.s_addr));
@@ -1009,7 +1210,7 @@ bool_t bctbx_is_multicast_addr(const struct sockaddr *addr) {
 		default:
 			return FALSE;
 	}
-	
+
 }
 
 #ifdef _WIN32
@@ -1085,7 +1286,7 @@ static struct addrinfo *convert_to_v4mapped(const struct addrinfo *ai){
 	const struct addrinfo *it;
 	struct addrinfo *v4m=NULL;
 	struct addrinfo *last=NULL;
-	
+
 	for (it=ai;it!=NULL;it=it->ai_next){
 		struct sockaddr_in6 *sin6;
 		struct sockaddr_in *sin;
@@ -1140,9 +1341,9 @@ int bctbx_getaddrinfo(const char *node, const char *service, const struct addrin
 		struct addrinfo *res4=NULL;
 		struct addrinfo lhints={0};
 		int err;
-		
+
 		if (hints) memcpy(&lhints,hints,sizeof(lhints));
-		
+
 		lhints.ai_flags &= ~(AI_ALL | AI_V4MAPPED); /*remove the unsupported flags*/
 		lhints.ai_family = AF_INET6;
 		err = getaddrinfo(node, service, &lhints, &res6);
@@ -1177,9 +1378,9 @@ int bctbx_getaddrinfo(const char *node, const char *service, const struct addrin
 				bctbx_message("Apple nat64 getaddrinfo bug, fixing port to [%i]",possible_port);
 				sockaddr->sin6_port = htons(possible_port);
 			}
-			
+
 		}
-		
+
 	}
 #endif
 	return result;
@@ -1219,7 +1420,7 @@ struct addrinfo* bctbx_addrinfo_sort(struct addrinfo *ais) {
 	struct addrinfo* res0 = NULL;
 	struct addrinfo* res = NULL;
 	struct addrinfo* ai = NULL;
-	
+
 	//sort by type
 	for (ai = ais; ai != NULL;  ) {
 		struct addrinfo* next = ai->ai_next;
@@ -1233,13 +1434,13 @@ struct addrinfo* bctbx_addrinfo_sort(struct addrinfo *ais) {
 		} else {
 				v4 = bctbx_list_prepend(v4, ai);
 		}
-		
+
 		ai->ai_next = NULL ;
 		ai = next;
 	}
 	v6 = bctbx_list_concat(v6, v4_mapped);
 	v6 = bctbx_list_concat(v6, v4);
-	
+
 	for (it = v6; it != NULL; it = it->next) {
 		if (res0 == NULL) {
 			res0 = res = (struct addrinfo*)it->data;
@@ -1250,9 +1451,9 @@ struct addrinfo* bctbx_addrinfo_sort(struct addrinfo *ais) {
 	}
 	if (res)
 		res->ai_next = NULL;
-	
+
 	bctbx_list_free(v6);
-	
+
 	return res0;
 }
 int bctbx_addrinfo_to_ip_address(const struct addrinfo *ai, char *ip, size_t ip_size, int *port){
@@ -1306,7 +1507,7 @@ static struct addrinfo * _bctbx_name_to_addrinfo(int family, int socktype, const
 	hints.ai_family=family;
 	if (numeric_only) hints.ai_flags=AI_NUMERICSERV|AI_NUMERICHOST;
 	hints.ai_socktype=socktype;
-	
+
 	if (family == AF_INET6) {
 		hints.ai_flags |= AI_V4MAPPED;
 		hints.ai_flags |= AI_ALL;
@@ -1321,7 +1522,7 @@ static struct addrinfo * _bctbx_name_to_addrinfo(int family, int socktype, const
 	//sort result
 	if (res)
 		res = bctbx_addrinfo_sort(res);
-	
+
 	return res;
 }
 
@@ -1432,11 +1633,12 @@ void bctbx_sockaddr_remove_nat64_mapping(const struct sockaddr *v6, struct socka
 			in->sin_addr.s_addr = IN6_GET_ADDR_V4MAPPED(&in6->sin6_addr);
 			in->sin_port = in6->sin6_port;
 			*result_len = sizeof(struct sockaddr_in);
+			return;
 		}
-	} else {
-		*result_len = sizeof(struct sockaddr_in);
-		if (v6 != result) memcpy(result, v6, sizeof(struct sockaddr_in));
 	}
+	/* it was not a NAT64 address: just copy the source address as is, whatever it is.*/
+	*result_len = v6->sa_family == AF_INET6 ? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in);
+	if (v6 != result) memcpy(result, v6, *result_len);
 }
 
 void bctbx_sockaddr_ipv6_to_ipv4(const struct sockaddr *v6, struct sockaddr *result, socklen_t *result_len) {
@@ -1474,22 +1676,23 @@ char * bctbx_concat(const char *str, ...) {
 	va_list ap;
 	size_t allocated = 100;
 	char *result = (char *) malloc (allocated);
-	
+
 	if (result != NULL)
 	{
 		char *newp;
 		char *wp;
 		const char* s;
-		
+
 		va_start (ap, str);
-		
+
 		wp = result;
 		for (s = str; s != NULL; s = va_arg (ap, const char *)) {
 			size_t len = strlen (s);
-			
+
 			/* Resize the allocated memory if necessary.  */
 			if (wp + len + 1 > result + allocated)
 			{
+				intptr_t current_offset = wp - result;
 				allocated = (allocated + len) * 2;
 				newp = (char *) realloc (result, allocated);
 				if (newp == NULL)
@@ -1497,32 +1700,32 @@ char * bctbx_concat(const char *str, ...) {
 					free (result);
 					return NULL;
 				}
-				wp = newp + (wp - result);
+				wp = newp + current_offset;
 				result = newp;
 			}
 			memcpy (wp, s, len);
 			wp +=len;
 		}
-		
+
 		/* Terminate the result string.  */
 		*wp++ = '\0';
-		
+
 		/* Resize memory to the optimal size.  */
 		newp = realloc (result, wp - result);
 		if (newp != NULL)
 			result = newp;
-		
+
 		va_end (ap);
 	}
-	
+
 	return result;
 }
 
 bool_t bctbx_sockaddr_equals(const struct sockaddr * sa, const struct sockaddr * sb) {
-	
+
 	if (sa->sa_family != sb->sa_family)
 		return FALSE;
-	
+
 	if (sa->sa_family == AF_INET) {
 		if ((((struct sockaddr_in*)sa)->sin_addr.s_addr != ((struct sockaddr_in*)sb)->sin_addr.s_addr
 			 || ((struct sockaddr_in*)sa)->sin_port != ((struct sockaddr_in*)sb)->sin_port))
@@ -1538,7 +1741,7 @@ bool_t bctbx_sockaddr_equals(const struct sockaddr * sa, const struct sockaddr *
 		return FALSE;
 	}
 	return TRUE;
-	
+
 }
 
 static const char *ai_family_to_string(int af) {
@@ -1784,7 +1987,25 @@ int mblen(const char* s, size_t n) {
   mbstate_t state = {};
   return (int)mbrlen(s, n, &state);
 }
-int wctomb(char *s, wchar_t wc) { 
-  return wcrtomb(s,wc,NULL); 
+int wctomb(char *s, wchar_t wc) {
+  return wcrtomb(s,wc,NULL);
+}
+#endif
+
+int bctbx_strcasecmp(const char *a, const char *b) {
+	if (a == NULL) a = "";
+	if (b == NULL) b = "";
+	return strcasecmp(a, b);
+}
+
+int bctbx_strcmp(const char *a, const char *b) {
+	if (a == NULL) a = "";
+	if (b == NULL) b = "";
+	return strcmp(a, b);
+}
+
+#if !defined(_WIN32)
+void bctbx_set_stack_trace_hooks(bool_t use_bctbx_hooks){
+	bctbx_warning("bctbx_set_stack_trace_hooks(): not implemented on this platform.");
 }
 #endif

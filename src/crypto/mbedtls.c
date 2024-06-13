@@ -38,6 +38,7 @@
 #include <mbedtls/sha256.h>
 #include <mbedtls/sha512.h>
 #include <mbedtls/gcm.h>
+#include <mbedtls/oid.h>
 
 #if MBEDTLS_VERSION_NUMBER >= 0x02040000 // v2.4.0
 #include <mbedtls/net_sockets.h>
@@ -57,7 +58,12 @@
  * @param[in]		size	buffer size
  */
 void bctbx_clean(void *buffer, size_t size) {
+#if MBEDTLS_VERSION_NUMBER >= 0x020A0000 // v2.10.0
 	mbedtls_platform_zeroize(buffer, size);
+#else
+	volatile uint8_t *p = buffer;
+	while(size--) *p++ = 0;
+#endif
 }
 
 /*** Error code translation ***/
@@ -101,30 +107,6 @@ int32_t bctbx_base64_decode(unsigned char *output, size_t *output_length, const 
 	}
 
 	return ret;
-}
-
-/*** Random Number Generation ***/
-struct bctbx_rng_context_struct {
-	mbedtls_entropy_context entropy;
-	mbedtls_ctr_drbg_context ctr_drbg;
-};
-
-bctbx_rng_context_t *bctbx_rng_context_new(void) {
-	bctbx_rng_context_t *ctx = bctbx_malloc0(sizeof(bctbx_rng_context_t));
-	mbedtls_entropy_init(&(ctx->entropy));
-	mbedtls_ctr_drbg_init(&(ctx->ctr_drbg));
-	mbedtls_ctr_drbg_seed(&(ctx->ctr_drbg), mbedtls_entropy_func, &(ctx->entropy), NULL, 0);
-	return ctx;
-}
-
-int32_t bctbx_rng_get(bctbx_rng_context_t *context, unsigned char*output, size_t output_length) {
-	return mbedtls_ctr_drbg_random(&(context->ctr_drbg), output, output_length);
-}
-
-void bctbx_rng_context_free(bctbx_rng_context_t *context) {
-	mbedtls_ctr_drbg_free(&(context->ctr_drbg));
-	mbedtls_entropy_free(&(context->entropy));
-	bctbx_free(context);
 }
 
 /*** signing key ***/
@@ -178,7 +160,7 @@ int32_t bctbx_signing_key_parse_file(bctbx_signing_key_t *key, const char *path,
 
 
 /*** Certificate ***/
-char *bctbx_x509_certificates_chain_get_pem(bctbx_x509_certificate_t *cert) {
+char *bctbx_x509_certificates_chain_get_pem(const bctbx_x509_certificate_t *cert) {
 	char *pem_certificate = NULL;
 	size_t olen=0;
 
@@ -246,26 +228,26 @@ int32_t bctbx_x509_certificate_get_subject_dn(const bctbx_x509_certificate_t *ce
 
 bctbx_list_t *bctbx_x509_certificate_get_subjects(const bctbx_x509_certificate_t *cert){
 	bctbx_list_t *ret = NULL;
-	char subject[1024]={0};
-	const mbedtls_x509_sequence *subjectAltNames = &((mbedtls_x509_crt *)cert)->subject_alt_names;
-	
-	for (; subjectAltNames != NULL; subjectAltNames = subjectAltNames->next){
-		const mbedtls_asn1_buf *buf = &subjectAltNames->buf;
-		if (buf->tag == ( MBEDTLS_ASN1_CONTEXT_SPECIFIC | 2 ) ){
-			if (buf->p){
-				ret = bctbx_list_append(ret, bctbx_strndup((char*)buf->p, buf->len));
+
+
+	if (cert != NULL) {
+		mbedtls_x509_crt *mbedtls_cert = (mbedtls_x509_crt *)cert; // bctbx_x509_certificate_t is just a cast of mbedtls_x509_crt
+		/* parse subjectAltName if any */
+		if( mbedtls_cert->ext_types & MBEDTLS_X509_EXT_SUBJECT_ALT_NAME ) {
+			const mbedtls_x509_sequence *cur = &(mbedtls_cert->subject_alt_names);
+			while (cur != NULL) {
+				ret = bctbx_list_append(ret, bctbx_strndup((const char*)cur->buf.p, (int)cur->buf.len));
+				cur = cur->next;
 			}
 		}
-	}
-	
-	if (bctbx_x509_certificate_get_subject_dn(cert, subject, sizeof(subject)-1) > 0){
-		char *cn = strstr(subject, "CN=");
-		if (cn){
-			char *end;
-			cn += 3;
-			end = strchr(cn, ',');
-			if (end) *end = '\0';
-			ret = bctbx_list_append(ret, bctbx_strdup(cn));
+
+		/* Add Subject CN */
+		const mbedtls_x509_name *subject = &(mbedtls_cert->subject);
+		while (subject != NULL) { // Certificate should hold only one CN, but be permissive and parse several if they are in the certificate
+			if( MBEDTLS_OID_CMP( MBEDTLS_OID_AT_CN, &subject->oid ) == 0 ) { // subject holds all the distinguished name in asn1 format, get the CN only
+				ret = bctbx_list_append(ret, bctbx_strndup((const char*)subject->val.p, (int)subject->val.len));
+			}
+			subject = subject->next;
 		}
 	}
 	return ret;
@@ -473,7 +455,7 @@ int32_t bctbx_x509_certificate_get_fingerprint(const bctbx_x509_certificate_t *c
 		break;
 
 		case MBEDTLS_MD_SHA512:
-			mbedtls_sha512(crt->raw.p, crt->raw.len, buffer, 0); /* last argument is a boolean, indicate to output sha-384 and not sha-512 */
+			mbedtls_sha512(crt->raw.p, crt->raw.len, buffer, 0);
 			hash_length = 64;
 			hash_alg_string="SHA-512";
 		break;
@@ -830,23 +812,23 @@ static int bctbx_ssl_sendrecv_callback_return_remap(int32_t ret_code) {
  */
 const mbedtls_x509_crt_profile bctbx_x509_crt_profile_default =
 {
-    /* Hashes from SHA-1 and above */
-    MBEDTLS_X509_ID_FLAG( MBEDTLS_MD_SHA1 ) |
-    MBEDTLS_X509_ID_FLAG( MBEDTLS_MD_RIPEMD160 ) |
-    MBEDTLS_X509_ID_FLAG( MBEDTLS_MD_SHA224 ) |
-    MBEDTLS_X509_ID_FLAG( MBEDTLS_MD_SHA256 ) |
-    MBEDTLS_X509_ID_FLAG( MBEDTLS_MD_SHA384 ) |
-    MBEDTLS_X509_ID_FLAG( MBEDTLS_MD_SHA512 ),
-    0xFFFFFFF, /* Any PK alg    */
-    0xFFFFFFF, /* Any curve     */
-    1024,
+	/* Hashes from SHA-1 and above */
+	MBEDTLS_X509_ID_FLAG( MBEDTLS_MD_SHA1 ) |
+	MBEDTLS_X509_ID_FLAG( MBEDTLS_MD_RIPEMD160 ) |
+	MBEDTLS_X509_ID_FLAG( MBEDTLS_MD_SHA224 ) |
+	MBEDTLS_X509_ID_FLAG( MBEDTLS_MD_SHA256 ) |
+	MBEDTLS_X509_ID_FLAG( MBEDTLS_MD_SHA384 ) |
+	MBEDTLS_X509_ID_FLAG( MBEDTLS_MD_SHA512 ),
+	0xFFFFFFF, /* Any PK alg    */
+	0xFFFFFFF, /* Any curve     */
+	1024,
 };
 
 /** context **/
 struct bctbx_ssl_context_struct {
 	mbedtls_ssl_context ssl_ctx;
-	int(*callback_cli_cert_function)(void *, bctbx_ssl_context_t *, unsigned char *, size_t); /**< pointer to the callback called to update client certificate during handshake
-													callback params are user_data, ssl_context, certificate distinguished name, name length */
+	int(*callback_cli_cert_function)(void *, bctbx_ssl_context_t *, const bctbx_list_t *); /**< pointer to the callback called to update client certificate during handshake
+												callback params are user_data, ssl_context, list of server certificate subject alt name and CN (null terminated strings) */
 	void *callback_cli_cert_data; /**< data passed to the client cert callback */
 	int(*callback_send_function)(void *, const unsigned char *, size_t); /* callbacks args are: callback data, data buffer to be send, size of data buffer */
 	int(*callback_recv_function)(void *, unsigned char *, size_t); /* args: callback data, data buffer to be read, size of data buffer */
@@ -914,15 +896,19 @@ int32_t bctbx_ssl_handshake(bctbx_ssl_context_t *ssl_ctx) {
 			/* when in state SSL_CLIENT_CERTIFICATE - which means, next call to ssl_handshake_step will send the client certificate to server -
 			 * and the client_auth flag is set - which means the server requested a client certificate - */
 			if (ssl_ctx->ssl_ctx.state == MBEDTLS_SSL_CLIENT_CERTIFICATE && ssl_ctx->ssl_ctx.client_auth > 0) {
-				/* TODO: retrieve certificate dn during handshake from server certificate request
-				 * for now the dn params in the callback are set to NULL and 0(dn string length) */
-				if (ssl_ctx->callback_cli_cert_function(ssl_ctx->callback_cli_cert_data, ssl_ctx, NULL, 0)!=0) {
+				/* Retrieve peer certificate subject altname and cn during handshake from server certificate request
+				 * Get the peer certificate from mbedtls ssl context. No accessor to get it,
+				 * fetch it directly from session_negociate which holds the currently negotiated handshake */
+				bctbx_list_t *names = bctbx_x509_certificate_get_subjects((const bctbx_x509_certificate_t *)ssl_ctx->ssl_ctx.session_negotiate->peer_cert);
+
+				if (ssl_ctx->callback_cli_cert_function(ssl_ctx->callback_cli_cert_data, ssl_ctx, names)!=0) {
+					bctbx_list_free_with_data(names, bctbx_free);
 					if((ret=mbedtls_ssl_send_alert_message(&(ssl_ctx->ssl_ctx), MBEDTLS_SSL_ALERT_LEVEL_FATAL, MBEDTLS_SSL_ALERT_MSG_HANDSHAKE_FAILURE)) != 0 )
 						return( ret );
 				}
+				bctbx_list_free_with_data(names, bctbx_free);
 			}
 		}
-
 	}
 
 	/* remap some output codes */
@@ -1007,19 +993,22 @@ uint8_t bctbx_dtls_srtp_supported(void) {
 }
 
 void bctbx_ssl_set_mtu(bctbx_ssl_context_t *ssl_ctx, uint16_t mtu) {
-	// remove the record expansion to the given MTU
-	mbedtls_ssl_set_mtu(&(ssl_ctx->ssl_ctx), mtu - mbedtls_ssl_get_record_expansion(&(ssl_ctx->ssl_ctx)));
+	// remove all headers to the given MTU:
+	// DTLS header (mbedtls_ssl_get_record_expansion)
+	// UDP header: 8 bytes
+	// IP header(up to 40 bytes when usimg IP v6)
+	mbedtls_ssl_set_mtu(&(ssl_ctx->ssl_ctx), (mtu - mbedtls_ssl_get_record_expansion(&(ssl_ctx->ssl_ctx)) - 8 - 40));
 }
 
 static bctbx_dtls_srtp_profile_t bctbx_srtp_profile_mbedtls2bctoolbox(mbedtls_ssl_srtp_profile mbedtls_profile) {
 	switch (mbedtls_profile) {
-		case MBEDTLS_SRTP_AES128_CM_HMAC_SHA1_80:
+		case MBEDTLS_TLS_SRTP_AES128_CM_HMAC_SHA1_80:
 			return BCTBX_SRTP_AES128_CM_HMAC_SHA1_80;
-		case MBEDTLS_SRTP_AES128_CM_HMAC_SHA1_32:
+		case MBEDTLS_TLS_SRTP_AES128_CM_HMAC_SHA1_32:
 			return BCTBX_SRTP_AES128_CM_HMAC_SHA1_32;
-		case MBEDTLS_SRTP_NULL_HMAC_SHA1_80:
+		case MBEDTLS_TLS_SRTP_NULL_HMAC_SHA1_80:
 			return BCTBX_SRTP_NULL_HMAC_SHA1_80;
-		case MBEDTLS_SRTP_NULL_HMAC_SHA1_32:
+		case MBEDTLS_TLS_SRTP_NULL_HMAC_SHA1_32:
 			return BCTBX_SRTP_NULL_HMAC_SHA1_32;
 		default:
 			return BCTBX_SRTP_UNDEFINED;
@@ -1029,42 +1018,29 @@ static bctbx_dtls_srtp_profile_t bctbx_srtp_profile_mbedtls2bctoolbox(mbedtls_ss
 static mbedtls_ssl_srtp_profile bctbx_srtp_profile_bctoolbox2mbedtls(bctbx_dtls_srtp_profile_t bctbx_profile) {
 	switch (bctbx_profile) {
 		case BCTBX_SRTP_AES128_CM_HMAC_SHA1_80:
-			return MBEDTLS_SRTP_AES128_CM_HMAC_SHA1_80;
+			return MBEDTLS_TLS_SRTP_AES128_CM_HMAC_SHA1_80;
 		case BCTBX_SRTP_AES128_CM_HMAC_SHA1_32:
-			return MBEDTLS_SRTP_AES128_CM_HMAC_SHA1_32;
+			return MBEDTLS_TLS_SRTP_AES128_CM_HMAC_SHA1_32;
 		case BCTBX_SRTP_NULL_HMAC_SHA1_80:
-			return MBEDTLS_SRTP_NULL_HMAC_SHA1_80;
+			return MBEDTLS_TLS_SRTP_NULL_HMAC_SHA1_80;
 		case BCTBX_SRTP_NULL_HMAC_SHA1_32:
-			return MBEDTLS_SRTP_NULL_HMAC_SHA1_32;
+			return MBEDTLS_TLS_SRTP_NULL_HMAC_SHA1_32;
 		default:
-			return MBEDTLS_SRTP_UNSET_PROFILE;
+			return MBEDTLS_TLS_SRTP_UNSET;
 	}
 }
+
 
 bctbx_dtls_srtp_profile_t bctbx_ssl_get_dtls_srtp_protection_profile(bctbx_ssl_context_t *ssl_ctx) {
 	if (ssl_ctx==NULL) {
 		return BCTBX_ERROR_INVALID_SSL_CONTEXT;
 	}
 
-	return bctbx_srtp_profile_mbedtls2bctoolbox(mbedtls_ssl_get_dtls_srtp_protection_profile(&(ssl_ctx->ssl_ctx)));
+	mbedtls_dtls_srtp_info dtls_srtp_negotiation_result;
+	mbedtls_ssl_get_dtls_srtp_negotiation_result(&(ssl_ctx->ssl_ctx), &dtls_srtp_negotiation_result);
+	return bctbx_srtp_profile_mbedtls2bctoolbox(dtls_srtp_negotiation_result.chosen_dtls_srtp_profile);
 };
 
-
-int32_t bctbx_ssl_get_dtls_srtp_key_material(bctbx_ssl_context_t *ssl_ctx, char *output, size_t *output_length) {
-	int ret = 0;
-	if (ssl_ctx==NULL) {
-		return BCTBX_ERROR_INVALID_SSL_CONTEXT;
-	}
-
-	ret = mbedtls_ssl_get_dtls_srtp_key_material(&(ssl_ctx->ssl_ctx), (unsigned char *)output, *output_length, output_length);
-
-	/* remap the output error code */
-	if (ret == MBEDTLS_ERR_SSL_BUFFER_TOO_SMALL) {
-		return BCTBX_ERROR_OUTPUT_BUFFER_TOO_SMALL;
-	}
-
-	return 0;
-}
 #else /* HAVE_DTLS_SRTP */
 /* dummy DTLS api when not available */
 uint8_t bctbx_dtls_srtp_supported(void) {
@@ -1077,21 +1053,29 @@ bctbx_dtls_srtp_profile_t bctbx_ssl_get_dtls_srtp_protection_profile(bctbx_ssl_c
 	return BCTBX_SRTP_UNDEFINED;
 }
 
-int32_t bctbx_ssl_get_dtls_srtp_key_material(bctbx_ssl_context_t *ssl_ctx, char *output, size_t *output_length) {
-	*output_length = 0;
-	return BCTBX_ERROR_UNAVAILABLE_FUNCTION;
-}
 #endif /* HAVE_DTLS_SRTP */
 
 /** DTLS SRTP functions **/
 
 /** config **/
+#ifdef HAVE_DTLS_SRTP
+typedef struct bctbx_dtls_srtp_keys {
+	uint8_t master_secret[48]; // master secret generated during handshake
+	uint8_t randoms[64]; // client || server randoms, 32 bytes each
+	mbedtls_tls_prf_types tls_prf_type; // prf function identification
+} bctbx_dtls_srtp_keys_t;
+#endif /* HAVE_DTLS_SRTP */
+
 struct bctbx_ssl_config_struct {
 	mbedtls_ssl_config *ssl_config; /**< actual config structure */
 	uint8_t ssl_config_externally_provided; /**< a flag, on when the ssl_config was provided by callers and not created threw the new function */
-	int(*callback_cli_cert_function)(void *, bctbx_ssl_context_t *, unsigned char *, size_t); /**< pointer to the callback called to update client certificate during handshake
-													callback params are user_data, ssl_context, certificate distinguished name, name length */
+	int(*callback_cli_cert_function)(void *, bctbx_ssl_context_t *, const bctbx_list_t *); /**< pointer to the callback called to update client certificate during handshake
+												callback params are user_data, ssl_context, list of server certificate subject alt name and CN (null terminated strings) */
 	void *callback_cli_cert_data; /**< data passed to the client cert callback */
+#ifdef HAVE_DTLS_SRTP
+	mbedtls_ssl_srtp_profile dtls_srtp_mbedtls_profiles[MBEDTLS_TLS_SRTP_MAX_PROFILE_LIST_LENGTH + 1]; /**< list of supported DTLS-SRTP profiles, mbedtls won't hold the reference, so we must do it for the lifetime of the config structure. (size is +1 to add the list termination) */
+	bctbx_dtls_srtp_keys_t dtls_srtp_keys; /**< Key material is stored during the handshake there and used after completion to generate the DTLS-SRTP shared secret */
+#endif /* HAVE_DTLS_SRTP */
 };
 
 bctbx_ssl_config_t *bctbx_ssl_config_new(void) {
@@ -1142,6 +1126,11 @@ void bctbx_ssl_config_free(bctbx_ssl_config_t *ssl_config) {
 		bctbx_free(ssl_config->ssl_config);
 	}
 
+#ifdef HAVE_DTLS_SRTP
+	bctbx_clean(ssl_config->dtls_srtp_keys.master_secret, sizeof(ssl_config->dtls_srtp_keys.master_secret));
+	bctbx_clean(ssl_config->dtls_srtp_keys.randoms, sizeof(ssl_config->dtls_srtp_keys.randoms));
+#endif /* HAVE_DTLS_SRTP */
+
 	bctbx_free(ssl_config);
 }
 
@@ -1180,6 +1169,11 @@ int32_t bctbx_ssl_config_defaults(bctbx_ssl_config_t *ssl_config, int endpoint, 
 	if (ret <0) {
 		return ret;
 	}
+	if (transport == BCTBX_SSL_TRANSPORT_DATAGRAM) {
+		// Set agressive repetition timer for DTLS handshake
+		mbedtls_ssl_conf_handshake_timeout(ssl_config->ssl_config, 400, 15000);
+	}
+
 
 	/* Set the default x509 security profile used for verification of all certificate in chain */
 	mbedtls_ssl_conf_cert_profile(ssl_config->ssl_config, &bctbx_x509_crt_profile_default);
@@ -1298,7 +1292,7 @@ int32_t bctbx_ssl_config_set_callback_verify(bctbx_ssl_config_t *ssl_config, int
 	return 0;
 }
 
-int32_t bctbx_ssl_config_set_callback_cli_cert(bctbx_ssl_config_t *ssl_config, int(*callback_function)(void *, bctbx_ssl_context_t *, unsigned char *, size_t), void *callback_data) {
+int32_t bctbx_ssl_config_set_callback_cli_cert(bctbx_ssl_config_t *ssl_config, int(*callback_function)(void *, bctbx_ssl_context_t *, const bctbx_list_t *), void *callback_data) {
 	if (ssl_config == NULL) {
 		return BCTBX_ERROR_INVALID_SSL_CONFIG;
 	}
@@ -1328,26 +1322,66 @@ int32_t bctbx_ssl_config_set_own_cert(bctbx_ssl_config_t *ssl_config, bctbx_x509
 
 /** DTLS SRTP functions **/
 #ifdef HAVE_DTLS_SRTP
+/* key derivation code */
+
+/* This callback is executed during the DTLS handshake, extract the master secret and randoms needed to generate the DTLS-SRTP keys
+ * The generation itself is performed after the handshake */
+static int bctbx_ssl_dtls_srtp_key_derivation(void *key_ctx, const unsigned char *ms,
+		const unsigned char *kb, size_t maclen, size_t keylen, size_t ivlen, // these params are useless for our purpose
+		const unsigned char client_random[32], const unsigned char server_random[32],
+		mbedtls_tls_prf_types tls_prf_type ) {
+
+	bctbx_dtls_srtp_keys_t *keys = (bctbx_dtls_srtp_keys_t *)key_ctx;
+	memcpy(keys->master_secret, ms, sizeof(keys->master_secret)); // copy the master secret
+	memcpy(keys->randoms, client_random, 32); // the client and server random
+	memcpy(keys->randoms + 32, server_random, 32);
+	keys->tls_prf_type = tls_prf_type; // the prf id
+	return(0);
+}
+
+int32_t bctbx_ssl_get_dtls_srtp_key_material(bctbx_ssl_config_t *ssl_config, uint8_t *output, size_t *output_length) {
+	int ret = 0;
+	if (ssl_config==NULL) {
+		return BCTBX_ERROR_INVALID_SSL_CONTEXT;
+	}
+
+	//ret = mbedtls_ssl_get_dtls_srtp_key_material(&(ssl_ctx->ssl_ctx), (unsigned char *)output, *output_length, output_length);
+	ret = mbedtls_ssl_tls_prf( ssl_config->dtls_srtp_keys.tls_prf_type, ssl_config->dtls_srtp_keys.master_secret, sizeof( ssl_config->dtls_srtp_keys.master_secret ), "EXTRACTOR-dtls_srtp", ssl_config->dtls_srtp_keys.randoms, sizeof( ssl_config->dtls_srtp_keys.randoms ), output, *output_length );
+
+	/* remap the output error code */
+	if (ret == MBEDTLS_ERR_SSL_BUFFER_TOO_SMALL) {
+		return BCTBX_ERROR_OUTPUT_BUFFER_TOO_SMALL;
+	}
+
+	return 0;
+}
+
 int32_t bctbx_ssl_config_set_dtls_srtp_protection_profiles(bctbx_ssl_config_t *ssl_config, const bctbx_dtls_srtp_profile_t *profiles, size_t profiles_number) {
 	size_t i;
-	mbedtls_ssl_srtp_profile dtls_srtp_mbedtls_profiles[4];
-
 	if (ssl_config == NULL) {
 		return BCTBX_ERROR_INVALID_SSL_CONFIG;
 	}
 
 	/* convert the profiles array into a mbedtls profiles array */
-	for (i=0; i<profiles_number && i<4; i++) { /* 4 profiles defined max */
-		dtls_srtp_mbedtls_profiles[i] = bctbx_srtp_profile_bctoolbox2mbedtls(profiles[i]);
+	for (i=0; i<profiles_number && i<MBEDTLS_TLS_SRTP_MAX_PROFILE_LIST_LENGTH; i++) { /* MBEDTLS_TLS_SRTP_MAX_PROFILE_LIST_LENGTH profiles defined max */
+		ssl_config->dtls_srtp_mbedtls_profiles[i] = bctbx_srtp_profile_bctoolbox2mbedtls(profiles[i]);
 	}
-	for (;i<4; i++) { /* make sure to have harmless values in the rest of the array */
-		dtls_srtp_mbedtls_profiles[i] = MBEDTLS_SRTP_UNSET_PROFILE;
+	for (;i<=MBEDTLS_TLS_SRTP_MAX_PROFILE_LIST_LENGTH; i++) { /* make sure to have a MBEDTLS_TLS_SRTP_UNSET terminated list and harmless values in the rest of the array */
+		ssl_config->dtls_srtp_mbedtls_profiles[i] = MBEDTLS_TLS_SRTP_UNSET;
 	}
 
-	return mbedtls_ssl_conf_dtls_srtp_protection_profiles(ssl_config->ssl_config, dtls_srtp_mbedtls_profiles, profiles_number);
+	/* set the callback to compute the key material */
+	mbedtls_ssl_conf_export_keys_ext_cb(ssl_config->ssl_config, bctbx_ssl_dtls_srtp_key_derivation, &(ssl_config->dtls_srtp_keys));
+
+	return mbedtls_ssl_conf_dtls_srtp_protection_profiles(ssl_config->ssl_config, ssl_config->dtls_srtp_mbedtls_profiles); // no profile number, list is UNSET terminated
 }
 
 #else /* HAVE_DTLS_SRTP */
+int32_t bctbx_ssl_get_dtls_srtp_key_material(bctbx_ssl_config_t *ssl_ctx, uint8_t *output, size_t *output_length) {
+	*output_length = 0;
+	return BCTBX_ERROR_UNAVAILABLE_FUNCTION;
+}
+
 int32_t bctbx_ssl_config_set_dtls_srtp_protection_profiles(bctbx_ssl_config_t *ssl_config, const bctbx_dtls_srtp_profile_t *profiles, size_t profiles_number) {
 	return BCTBX_ERROR_UNAVAILABLE_FUNCTION;
 }
@@ -1486,7 +1520,7 @@ void bctbx_sha512(const uint8_t *input,
 		uint8_t *output)
 {
 	uint8_t hashOutput[64];
-	mbedtls_sha512(input, inputLength, hashOutput, 0); /* last param to zero to select SHA512 and not SHA384 */
+	mbedtls_sha512(input, inputLength, hashOutput, 0);
 
 	/* check output length, can't be>64 */
 	if (hashLength>64) {
@@ -1509,7 +1543,7 @@ void bctbx_sha384(const uint8_t *input,
 		uint8_t hashLength,
 		uint8_t *output)
 {
-	uint8_t hashOutput[48];
+	uint8_t hashOutput[64];
 	mbedtls_sha512(input, inputLength, hashOutput, 1); /* last param to one to select SHA384 and not SHA512 */
 
 	/* check output length, can't be>48 */
@@ -1762,8 +1796,8 @@ int32_t bctbx_aes_gcm_finish(bctbx_aes_gcm_context_t *context,
  * @param[out]	output		Output data buffer
  *
  */
-void bctbx_aes128CfbEncrypt(const uint8_t key[16],
-		const uint8_t IV[16],
+void bctbx_aes128CfbEncrypt(const uint8_t *key,
+		const uint8_t *IV,
 		const uint8_t *input,
 		size_t inputLength,
 		uint8_t *output)
@@ -1794,8 +1828,8 @@ void bctbx_aes128CfbEncrypt(const uint8_t key[16],
  * @param[out]	output		Output data buffer
  *
  */
-void bctbx_aes128CfbDecrypt(const uint8_t key[16],
-		const uint8_t IV[16],
+void bctbx_aes128CfbDecrypt(const uint8_t *key,
+		const uint8_t *IV,
 		const uint8_t *input,
 		size_t inputLength,
 		uint8_t *output)
@@ -1826,8 +1860,8 @@ void bctbx_aes128CfbDecrypt(const uint8_t key[16],
  * @param[out]	output		Output data buffer
  *
  */
-void bctbx_aes256CfbEncrypt(const uint8_t key[32],
-		const uint8_t IV[16],
+void bctbx_aes256CfbEncrypt(const uint8_t *key,
+		const uint8_t *IV,
 		const uint8_t *input,
 		size_t inputLength,
 		uint8_t *output)
@@ -1855,8 +1889,8 @@ void bctbx_aes256CfbEncrypt(const uint8_t key[32],
  * @param[out]	output		Output data buffer
  *
  */
-void bctbx_aes256CfbDecrypt(const uint8_t key[32],
-		const uint8_t IV[16],
+void bctbx_aes256CfbDecrypt(const uint8_t *key,
+		const uint8_t *IV,
 		const uint8_t *input,
 		size_t inputLength,
 		uint8_t *output)
