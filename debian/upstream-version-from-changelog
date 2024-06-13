@@ -1,0 +1,37 @@
+#!/bin/sh
+
+# linphone-desktop calls us from within several levels of
+# subdirectories -- deepest seen so far:
+# linphone-app/cmake_builder/linphone_package/
+#
+# So walk up the directory tree and hopefully find debian/changelog
+for i in $(seq $(pwd|tr -cd /|wc -c) -1 0); do
+     f=$(pwd | cut -d/ -f1-$((i+1)))/debian/changelog
+     if [ -f "$f" ]; then
+         export DEB_CHANGELOG="$f"
+         break
+     fi
+done
+
+if [ -z "${DEB_CHANGELOG}" -o ! -f "${DEB_CHANGELOG}" ]; then
+    echo "$0: Error: DEB_CHANGELOG not set or not a file" >&2
+    exit 1
+fi
+
+if [ "$1" = rev-list -a x"$2" = x--count ]; then
+    echo 0;
+elif [ "$1" = rev-parse -a "$2" = HEAD ]; then
+    echo deadbeefdeadbeefdeadbeefdeadbeefdeadbeef # should NEVER show up anywhere
+elif [ "$1" = describe ]; then
+    if [ x"$2" = x -o x"$2" = x--abbrev=0 -o x"$2" = x--always ]; then
+        # BC commits to SemVer in pretty much all projects
+        #dpkg-parsechangelog -S Version -l ${DEB_CHANGELOG} | sed -Ene 's/^([0-9.]+)[-+].*$$/\1/p'
+        dpkg-parsechangelog -l ${DEB_CHANGELOG} | sed -Ene 's/^Version: ([0-9]+:)?([0-9.]+)[-+].*$$/\2/p'
+    else
+        echo "$0: Error: unknown arguments" >&2
+        exit 1
+    fi
+else
+    echo "$0: Error: unknown arguments" >&2
+    exit 1
+fi

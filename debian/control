@@ -2,18 +2,24 @@ Source: bctoolbox
 Priority: optional
 Maintainer: Debian VoIP Team <pkg-voip-maintainers@lists.alioth.debian.org>
 Uploaders: Bernhard Schmidt <berni@debian.org>
+Rules-Requires-Root: no
 Build-Depends: cmake,
-               debhelper-compat (= 12),
+               debhelper-compat (= 13),
+               libdecaf-dev,
                libmbedtls-dev,
-Standards-Version: 4.5.1
+Standards-Version: 4.6.2
 Section: libs
 Homepage: https://gitlab.linphone.org/BC/public/bctoolbox
 Vcs-Git: https://salsa.debian.org/pkg-voip-team/linphone-stack/bctoolbox.git
 Vcs-Browser: https://salsa.debian.org/pkg-voip-team/linphone-stack/bctoolbox
+Description: Helper code for software by Belledonne Communications
 
+# libbctoolbox-dev must be the first package for
+# upstream-version-from-changelog to get installed into it
 Package: libbctoolbox-dev
 Section: libdevel
 Architecture: any
+Multi-Arch: same
 Depends: libbctoolbox1 (= ${binary:Version}),
          ${misc:Depends},
 Description: Helper code for software by Belledonne Communications (development headers)

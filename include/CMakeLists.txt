@@ -25,14 +25,19 @@ set(HEADER_FILES
 	compiler.h
 	defs.h
 	exception.hh
+	utils.hh
 	list.h
 	logging.h
 	map.h
+	ownership.hh
 	parser.h
 	port.h
 	regex.h
 	vconnect.h
 	vfs.h
+	vfs_standard.h
+	vfs_encrypted.hh
+	param_string.h
 )
 
 if(APPLE)
@@ -41,6 +46,7 @@ endif()
 
 if(MBEDTLS_FOUND OR POLARSSL_FOUND)
 	list(APPEND HEADER_FILES crypto.h)
+	list(APPEND HEADER_FILES crypto.hh)
 endif()
 
 if(ENABLE_TESTS_COMPONENT)

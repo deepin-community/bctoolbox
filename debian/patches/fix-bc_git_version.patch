@@ -1,0 +1,20 @@
+Description: Don't try to produce gitversion.h if git is not installed
+--- a/cmake/BcToolboxCMakeUtils.cmake
++++ b/cmake/BcToolboxCMakeUtils.cmake
+@@ -66,10 +66,12 @@
+ 
+ macro(bc_git_version PROJECT_NAME PROJECT_VERSION)
+ 	find_package(Git)
+-	add_custom_target(${PROJECT_NAME}-git-version
+-		COMMAND ${CMAKE_COMMAND} -DGIT_EXECUTABLE=${GIT_EXECUTABLE} -DPROJECT_NAME=${PROJECT_NAME} -DPROJECT_VERSION=${PROJECT_VERSION} -DWORK_DIR=${CMAKE_CURRENT_SOURCE_DIR} -DTEMPLATE_DIR=${BCTOOLBOX_CMAKE_UTILS_DIR} -DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR} -P ${BCTOOLBOX_CMAKE_UTILS_DIR}/BcGitVersion.cmake
+-		BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/gitversion.h"
+-	)
++	if(Git_FOUND)
++		add_custom_target(${PROJECT_NAME}-git-version
++			COMMAND ${CMAKE_COMMAND} -DGIT_EXECUTABLE=${GIT_EXECUTABLE} -DPROJECT_NAME=${PROJECT_NAME} -DPROJECT_VERSION=${PROJECT_VERSION} -DWORK_DIR=${CMAKE_CURRENT_SOURCE_DIR} -DTEMPLATE_DIR=${BCTOOLBOX_CMAKE_UTILS_DIR} -DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR} -P ${BCTOOLBOX_CMAKE_UTILS_DIR}/BcGitVersion.cmake
++			BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/gitversion.h"
++		)
++	endif()
+ endmacro()
+ 
+ 
