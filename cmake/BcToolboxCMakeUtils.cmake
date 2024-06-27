@@ -1,6 +1,6 @@
 ############################################################################
 # BcToolboxCMakeUtils.cmake
-# Copyright (C) 2010-2019 Belledonne Communications, Grenoble France
+# Copyright (C) 2010-2021 Belledonne Communications, Grenoble France
 #
 ############################################################################
 #
@@ -130,48 +130,7 @@ macro(bc_generate_rpm_specfile SOURCE DEST)
 	endif()
 endmacro()
 
-function(bc_parse_full_version version major minor patch)
-	if ("${version}" MATCHES "^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(-[.0-9A-Za-z-]+)?([+][.0-9A-Za-z-]+)?$")
-	    set(${major}       "${CMAKE_MATCH_1}" PARENT_SCOPE)
-	    set(${minor}       "${CMAKE_MATCH_2}" PARENT_SCOPE)
-	    set(${patch}       "${CMAKE_MATCH_3}" PARENT_SCOPE)
-		if (ARGC GREATER 4)
-			set(${ARGV4} "${CMAKE_MATCH_4}" PARENT_SCOPE)
-		endif()
-		if (ARGC GREATER 5)
-			set(${ARGV5}    "${CMAKE_MATCH_5}" PARENT_SCOPE)
-		endif()
-	else()
-		message(FATAL_ERROR "invalid full version '${version}'")
-	endif()
-endfunction()
-
-function(bc_compute_lib_version OUTPUT_VERSION default_version)
-	find_program(GIT_EXECUTABLE git NAMES Git CMAKE_FIND_ROOT_PATH_BOTH)
-	if(GIT_EXECUTABLE)
-		execute_process(
-			COMMAND "${GIT_EXECUTABLE}" "describe"
-			OUTPUT_VARIABLE GIT_DESCRIBE_VERSION
-			OUTPUT_STRIP_TRAILING_WHITESPACE
-			ERROR_QUIET
-			WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-		)
-
-		# parse git describe version
-		if (NOT (GIT_DESCRIBE_VERSION MATCHES "^([0-9]+)[.]([0-9]+)[.]([0-9]+)(-alpha|-beta)?(-[0-9]+)?(-g[0-9a-f]+)?$"))
-			message(FATAL_ERROR "invalid git describe version: '${GIT_DESCRIBE_VERSION}'")
-			endif()
-		set(version_major ${CMAKE_MATCH_1})
-		set(version_minor ${CMAKE_MATCH_2})
-		set(version_patch ${CMAKE_MATCH_3})
-
-		# format lib version
-		set(${OUTPUT_VERSION} "${version_major}.${version_minor}.${version_patch}" CACHE STRING "")
-	else()
-		set(${OUTPUT_VERSION} "${default_version}" CACHE STRING "")
-	endif()
-endfunction()
-
+# Rules are following https://semver.org/
 function(bc_compute_full_version OUTPUT_VERSION)
 	find_program(GIT_EXECUTABLE git NAMES Git CMAKE_FIND_ROOT_PATH_BOTH)
 	if(GIT_EXECUTABLE)
@@ -222,13 +181,95 @@ function(bc_compute_full_version OUTPUT_VERSION)
 			set(short_project_version "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 			if(NOT (short_project_version VERSION_EQUAL short_git_version))
 				message(FATAL_ERROR
-					"project and git version are not compatible (project: '${PROJECT_VERSION}', git: '${full_version}'): "
+					"project and git version are not compatible (project: '${PROJECT_VERSION}', git: '${full_version}', at: '${CMAKE_CURRENT_SOURCE_DIR}'): "
 					"major and minor version are not equal !"
 				)
 			endif()
 		endif()
 
-		set(${OUTPUT_VERSION} "${full_version}" CACHE STRING "")
+		set(${OUTPUT_VERSION} "${full_version}" PARENT_SCOPE)
+	endif()
+endfunction()
+
+function(bc_compute_snapshots_or_releases_state OUTPUT_VERSION)
+	find_program(GIT_EXECUTABLE git NAMES Git CMAKE_FIND_ROOT_PATH_BOTH)
+	if(GIT_EXECUTABLE)
+		execute_process(
+			COMMAND "${GIT_EXECUTABLE}" "describe"
+			OUTPUT_VARIABLE GIT_DESCRIBE_VERSION
+			OUTPUT_STRIP_TRAILING_WHITESPACE
+			ERROR_QUIET
+			WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+		)
+
+		# Check git describe to see if we are on a release or not
+		set(snapshots_or_releases_state "snapshots")
+		if(NOT GIT_DESCRIBE_VERSION MATCHES ".*(alpha|beta).*")
+			set(snapshots_or_releases_state "releases")
+		endif()
+
+		set(${OUTPUT_VERSION} "${snapshots_or_releases_state}" PARENT_SCOPE)
+	endif()
+endfunction()
+
+# Allows to get the distinct parts of a full version number.
+# Parameters:
+# * version [input]           : the full version number as string.
+# * major   [output]          : the major version.
+# * minor   [output]          : the minor version.
+# * patch   [output]          : the patch version.
+# * branch  [output,optional] : aggregation of the branch name (alpha, beta, etc.) and the commit increment since the last tag.
+#                               The whole is prefixed by '-' and the result is empty for releases. 
+# * hash    [output,optional] : the commit hash prefixed by '+' or empty for releases.
+#
+# Example:
+# '5.2.1-alpha.145+e62e126' -> major : 5
+#                              minor : 2
+#                              patch : 1
+#                              branch : '-alpha.145'
+#                              hash : '+e62e126'
+#
+# '5.2.1' -> major : 5
+#            minor : 2
+#            patch : 1
+#            branch : <empty>
+#            hash : <empty>
+function(bc_parse_full_version version major minor patch)
+	if ("${version}" MATCHES "^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(-[.0-9A-Za-z-]+)?([+][.0-9A-Za-z-]+)?$")
+	    set(${major}       "${CMAKE_MATCH_1}" PARENT_SCOPE)
+	    set(${minor}       "${CMAKE_MATCH_2}" PARENT_SCOPE)
+	    set(${patch}       "${CMAKE_MATCH_3}" PARENT_SCOPE)
+		if (ARGC GREATER 4)
+			set(${ARGV4} "${CMAKE_MATCH_4}" PARENT_SCOPE)
+		endif()
+		if (ARGC GREATER 5)
+			set(${ARGV5}    "${CMAKE_MATCH_5}" PARENT_SCOPE)
+		endif()
+	else()
+		message(FATAL_ERROR "invalid full version '${version}'")
+	endif()
+endfunction()
+
+# Translate the full semantic version into version numbers suitable for GNU/Linux packages (RPM/DEB)
+# Parameters:
+# * full_version_in     [input]  : the full version which has been computed by bc_compute_full_version().
+# * package_version_out [output] : the name of a variable where to store the resulting package version number.
+# * package_release_out [output] : the name of a variable where to store the resulting package release number.
+#
+# Exemple:
+# '5.2.1-alpha.145+e62e126' -> version : '5.2.1'
+#                              release : '0.alpha.145+e62e126'
+#
+# '5.2.1' -> version : '5.2.1'
+#            release : '1'
+function(bc_compute_linux_package_version full_version_in package_version_out package_release_out)
+	bc_parse_full_version("${full_version_in}" version_major version_minor version_patch identifiers metadata)
+	set(${package_version_out} "${version_major}.${version_minor}.${version_patch}" PARENT_SCOPE)
+	if (NOT identifiers)
+	    set(${package_release_out} 1 PARENT_SCOPE)
+	else()
+	    string(SUBSTRING "${identifiers}" 1 -1 identifiers)
+	    set(${package_release_out} "0.${identifiers}${metadata}" PARENT_SCOPE)
 	endif()
 endfunction()
 
@@ -272,3 +313,44 @@ function(bc_make_package_source_target)
 	    DEPENDS ${specfile_target}
 	)
 endfunction()
+
+#Make a RELEASE file to work along liblinphone check_versions. It will be inside CMAKE_INSTALL_PREFIX but it will not be part of installation to avoid unwanted deployment.
+#OUTPUT_FOLDER is an out var and will be set as the folder in which the RELEASE file should be for check_version working.
+function(bc_get_release_file_folder OUTPUT_FOLDER)
+	if(WIN32)
+		set(${OUTPUT_FOLDER} "windows" PARENT_SCOPE)
+	elseif(IOS)
+		set(${OUTPUT_FOLDER} "ios" PARENT_SCOPE)
+	elseif(ANDROID)
+		set(${OUTPUT_FOLDER} "android" PARENT_SCOPE)
+	elseif(APPLE)
+		set(${OUTPUT_FOLDER} "macosx" PARENT_SCOPE)
+	else()
+		set(${OUTPUT_FOLDER} "linux" PARENT_SCOPE)
+	endif()
+endfunction()
+
+function(bc_make_release_file full_version file_url)
+	bc_parse_full_version(${full_version} LINPHONE_MAJOR_VERSION LINPHONE_MINOR_VERSION LINPHONE_MICRO_VERSION LINPHONE_BRANCH_VERSION)
+	file(WRITE "${CMAKE_INSTALL_PREFIX}/RELEASE" "${LINPHONE_MAJOR_VERSION}.${LINPHONE_MINOR_VERSION}.${LINPHONE_MICRO_VERSION}${LINPHONE_BRANCH_VERSION}\t${file_url}")
+endfunction()
+
+# This macro exactly behaves as CMake find_package() except it doesn't try to find the
+# package if a target with the same name already exists. Otherwise, find_package()
+# is executed with the same arguments than bc_find_package().
+# Should the target exist, the following variable (where <pkgname> is string passed as
+# fist argument) are set in the current scope:
+# * <pkgname>_FOUND: systematically set to ON;
+# * <pkgname>_TARGETNAME: systematically set to <pkgname>.
+macro(bc_find_package name)
+	if(TARGET ${name})
+		string(TOUPPER ${name} NAME)
+		set(${name}_FOUND ON)
+		set(${NAME}_FOUND ON)
+		set(${name}_TARGETNAME ${name})
+		set(${NAME}_TARGETNAME ${name})
+	else()
+		find_package(${ARGV})
+	endif()
+endmacro()
+##############################################################

@@ -26,7 +26,9 @@ set(BCTOOLBOX_C_SOURCE_FILES
 	parser.c
 	utils/port.c
 	vconnect.c
-	vfs.c
+	vfs/vfs.c
+	vfs/vfs_standard.c
+	param_string.c
 )
 
 set(BCTOOLBOX_CXX_SOURCE_FILES
@@ -34,6 +36,13 @@ set(BCTOOLBOX_CXX_SOURCE_FILES
 	conversion/charconv_encoding.cc
 	utils/exception.cc
 	utils/regex.cc
+	utils/utils.cc
+)
+
+set(BCTOOLBOX_PRIVATE_HEADER_FILES
+	vfs/vfs_encryption_module.hh
+	vfs/vfs_encryption_module_dummy.hh
+	vfs/vfs_encryption_module_aes256gcm_sha256.hh
 )
 
 if(APPLE)
@@ -43,6 +52,9 @@ if(APPLE)
 	set(BCTOOLBOX_IOS_OBJC_SOURCE_FILES
 		utils/ios_utils_app.mm
 	)
+endif()
+if(WIN32)
+	list(APPEND BCTOOLBOX_CXX_SOURCE_FILES utils/win_utils.cc)
 endif()
 
 if(ANDROID)
@@ -56,12 +68,21 @@ endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 	list(APPEND STRICT_OPTIONS_CXX "-x c++")
 endif()
+if(WIN32)
+	list(APPEND STRICT_OPTIONS_CXX "/EHa")
+	add_definitions(-EHa)
+endif()
 if(MBEDTLS_FOUND OR POLARSSL_FOUND)
 	list(APPEND BCTOOLBOX_C_SOURCE_FILES crypto/crypto.c)
 	list(APPEND BCTOOLBOX_CXX_SOURCE_FILES crypto/ecc.cc)
 endif()
 if(MBEDTLS_FOUND)
 	list(APPEND BCTOOLBOX_C_SOURCE_FILES crypto/mbedtls.c)
+	list(APPEND BCTOOLBOX_CXX_SOURCE_FILES
+		crypto/mbedtls.cc
+		vfs/vfs_encrypted.cc
+		vfs/vfs_encryption_module_dummy.cc
+		vfs/vfs_encryption_module_aes256gcm_sha256.cc)
 endif()
 if(POLARSSL_FOUND)
 	list(APPEND BCTOOLBOX_C_SOURCE_FILES crypto/polarssl.c)
@@ -81,7 +102,7 @@ bc_apply_compile_flags(BCTOOLBOX_OBJC_SOURCE_FILES STRICT_OPTIONS_CPP STRICT_OPT
 bc_apply_compile_flags(BCTOOLBOX_IOS_OBJC_SOURCE_FILES STRICT_OPTIONS_CPP STRICT_OPTIONS_OBJC)
 
 if(ENABLE_STATIC)
-	add_library(bctoolbox-static STATIC ${BCTOOLBOX_SOURCE_FILES} ${BCTOOLBOX_HEADER_FILES})
+	add_library(bctoolbox-static STATIC ${BCTOOLBOX_SOURCE_FILES} ${BCTOOLBOX_HEADER_FILES} ${BCTOOLBOX_PRIVATE_HEADER_FILES})
 	target_link_libraries(bctoolbox-static INTERFACE ${CMAKE_THREAD_LIBS_INIT})
 	if(APPLE)
 		target_link_libraries(bctoolbox-static INTERFACE "-framework Foundation" "-framework AVFoundation")
@@ -92,9 +113,6 @@ if(ENABLE_STATIC)
 		target_link_libraries(bctoolbox-static INTERFACE "Winmm" "Ws2_32")
 	endif()
 	set_target_properties(bctoolbox-static PROPERTIES LINKER_LANGUAGE "CXX")
-	if(NOT CMAKE_VERSION VERSION_LESS 3.1)
-		set_target_properties(bctoolbox-static PROPERTIES CXX_STANDARD 11 CXX_STANDARD_REQUIRED ON)
-	endif()
 	set_target_properties(bctoolbox-static PROPERTIES OUTPUT_NAME bctoolbox)
 	if(HAVE_LIBRT)
 		target_link_libraries(bctoolbox-static INTERFACE rt)
@@ -112,7 +130,7 @@ if(ENABLE_STATIC)
 	endif()
 endif()
 if(ENABLE_SHARED)
-	add_library(bctoolbox SHARED ${BCTOOLBOX_SOURCE_FILES} ${BCTOOLBOX_HEADER_FILES})
+	add_library(bctoolbox SHARED ${BCTOOLBOX_SOURCE_FILES} ${BCTOOLBOX_HEADER_FILES} ${BCTOOLBOX_PRIVATE_HEADER_FILES})
 	target_link_libraries(bctoolbox PRIVATE ${CMAKE_THREAD_LIBS_INIT})
 	if(APPLE)
 		if(IOS)
@@ -123,32 +141,48 @@ if(ENABLE_SHARED)
 		set_target_properties(bctoolbox PROPERTIES
 			FRAMEWORK TRUE
 			MACOSX_FRAMEWORK_IDENTIFIER org.linphone.bctoolbox
-			MACOSX_FRAMEWORK_INFO_PLIST "${CMAKE_SOURCE_DIR}/build/osx/Info.plist.in"
+			MACOSX_FRAMEWORK_INFO_PLIST "${PROJECT_SOURCE_DIR}/build/osx/Info.plist.in"
 			PUBLIC_HEADER "${BCTOOLBOX_HEADER_FILES}"
 		)
 	endif()
 	if(APPLE)
-		target_link_libraries(bctoolbox PRIVATE "-framework Foundation" "-framework AVFoundation")
+		if (IOS)
+			target_link_libraries(bctoolbox PRIVATE "-framework UIKit" "-framework Foundation" "-framework AVFoundation")
+		else()
+			target_link_libraries(bctoolbox PRIVATE "-framework Foundation" "-framework AVFoundation")
+		endif()
 		target_include_directories(bctoolbox SYSTEM PRIVATE ${ICONV_INCLUDE_DIRS})
 		target_link_libraries(bctoolbox PRIVATE ${ICONV_LIBRARIES})
 	endif()
 	if(WIN32)
+		set_target_properties(bctoolbox PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
 		if(NOT CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
 			target_link_libraries(bctoolbox PRIVATE "Winmm" "Ws2_32")
 		endif()
 		target_compile_definitions(bctoolbox PRIVATE "-DBCTBX_EXPORTS")
+		if(CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")#Fix error on 'vccorlib_lib_should_be_specified_before_msvcrt_lib_to_linker''
+			get_target_property(BC_LINK_FLAGS bctoolbox LINK_FLAGS)
+			if(NOT BC_LINK_FLAGS)
+				set(BC_LINK_FLAGS "")
+			endif()
+			if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+				list(APPEND BC_LINK_FLAGS "/nodefaultlib:vccorlibd /nodefaultlib:msvcrtd vccorlibd.lib msvcrtd.lib")
+			else()
+				list(APPEND BC_LINK_FLAGS "/nodefaultlib:vccorlib /nodefaultlib:msvcrt vccorlib.lib msvcrt.lib")
+			endif()
+			set_target_properties(bctoolbox PROPERTIES VS_WINRT_EXTENSIONS TRUE)
+			add_definitions(-ZW -EHsc)
+			set_target_properties(bctoolbox PROPERTIES LINK_FLAGS "${BC_LINK_FLAGS}")
+		endif()
 	endif()
 	set_target_properties(bctoolbox PROPERTIES LINKER_LANGUAGE "CXX")
-	if(NOT CMAKE_VERSION VERSION_LESS 3.1)
-	 	set_target_properties(bctoolbox PROPERTIES CXX_STANDARD 11 CXX_STANDARD_REQUIRED ON)
-	endif()
 	if(NOT ANDROID)
 		# Do not version shared library on Android
 		set_target_properties(bctoolbox PROPERTIES SOVERSION ${BCTOOLBOX_SO_VERSION})
 	endif()
 	if(MSVC)
 		if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-			install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_BUILD_TYPE}/bctoolbox.pdb
+			install(FILES $<TARGET_PDB_FILE:bctoolbox>
 				DESTINATION ${CMAKE_INSTALL_BINDIR}
 				PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
 			)
@@ -176,7 +210,7 @@ if(ENABLE_SHARED)
 		endif()
 		if(MSVC)
 			if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-				install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_BUILD_TYPE}/bctoolbox-tester.pdb
+				install(FILES $<TARGET_PDB_FILE:bctoolbox-tester>
 					DESTINATION ${CMAKE_INSTALL_BINDIR}
 					PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
 				)
@@ -206,7 +240,7 @@ if(APPLE)
 		set_target_properties(bctoolbox-ios PROPERTIES
 			FRAMEWORK TRUE
 			MACOSX_FRAMEWORK_IDENTIFIER org.linphone.bctoolbox-ios
-			MACOSX_FRAMEWORK_INFO_PLIST "${CMAKE_SOURCE_DIR}/build/osx/Info.plist.in"
+			MACOSX_FRAMEWORK_INFO_PLIST "${PROJECT_SOURCE_DIR}/build/osx/Info.plist.in"
 			LINK_FLAGS "-framework UIKit -framework Foundation -framework CoreFoundation"
 		)
 	endif()
@@ -214,12 +248,10 @@ endif()
 
 if(MBEDTLS_FOUND)
 	if(ENABLE_STATIC)
-		target_include_directories(bctoolbox-static SYSTEM PRIVATE ${MBEDTLS_INCLUDE_DIRS})
-		target_link_libraries(bctoolbox-static INTERFACE ${MBEDTLS_LIBRARIES})
+		target_link_libraries(bctoolbox-static INTERFACE ${MBEDTLS_TARGETS})
 	endif()
 	if(ENABLE_SHARED)
-		target_include_directories(bctoolbox SYSTEM PRIVATE ${MBEDTLS_INCLUDE_DIRS})
-		target_link_libraries(bctoolbox PRIVATE ${MBEDTLS_LIBRARIES})
+		target_link_libraries(bctoolbox PRIVATE ${MBEDTLS_TARGETS})
 	endif()
 endif()
 if(POLARSSL_FOUND)
@@ -252,7 +284,7 @@ if(ENABLE_TESTS_COMPONENT)
 			set_target_properties(bctoolbox-tester PROPERTIES
 				FRAMEWORK TRUE
 				MACOSX_FRAMEWORK_IDENTIFIER com.belledonne-communications.bctoolbox-tester
-				MACOSX_FRAMEWORK_INFO_PLIST "${CMAKE_SOURCE_DIR}/build/osx/Info.plist.in"
+				MACOSX_FRAMEWORK_INFO_PLIST "${PROJECT_SOURCE_DIR}/build/osx/Info.plist.in"
 				PUBLIC_HEADER "${BCTOOLBOX_HEADER_FILES}"
 			)
 		endif()

@@ -1,18 +1,61 @@
-bctoolbox (4.4.13.1-deepin1) unstable; urgency=medium
+bctoolbox (5.2.0-2.1) unstable; urgency=medium
 
-  * Fix build failure on deepin riscv 
+  * Non-maintainer upload.
+  * Rename libraries for 64-bit time_t transition.  Closes: #1063106
 
- -- Gui-Yue <yuemeng.gui@gmail.com>  Sun, 04 Dec 2022 06:56:23 +0000
+ -- Benjamin Drung <bdrung@debian.org>  Fri, 01 Mar 2024 11:44:51 +0000
 
-bctoolbox (4.4.13-3) unstable; urgency=medium
+bctoolbox (5.2.0-2) unstable; urgency=medium
 
-  [ Bernhard Schmidt ]
-  * Drop cmake version constraint satisfied in oldstable
+  * Release to unstable.
 
-  [ Andrea Pappacoda ]
-  * d/patches: fix GCC 11 build. Closes: #983985
+ -- Bernhard Schmidt <berni@debian.org>  Fri, 28 Jul 2023 17:22:11 +0200
 
- -- Bernhard Schmidt <berni@debian.org>  Sun, 30 Jan 2022 14:13:51 +0100
+bctoolbox (5.2.0-1) experimental; urgency=medium
+
+  * New upstream release 5.2.0
+  * Comply with Debian policy v4.6.2
+
+ -- Dennis Filder <d.filder@web.de>  Sun, 18 Dec 2022 19:13:22 +0100
+
+bctoolbox (5.1.64-2) unstable; urgency=medium
+
+  * Upload to unstable
+
+ -- Bernhard Schmidt <berni@debian.org>  Sun, 27 Nov 2022 17:22:50 +0100
+
+bctoolbox (5.1.64-1) experimental; urgency=medium
+
+  * New upstream version 5.1.64
+
+ -- Dennis Filder <d.filder@web.de>  Wed, 12 Oct 2022 19:23:53 +0200
+
+bctoolbox (5.0.37-3) unstable; urgency=medium
+
+  * Team upload.
+  * Release to unstable.
+
+ -- Bernhard Schmidt <berni@debian.org>  Sun, 11 Sep 2022 16:15:14 +0200
+
+bctoolbox (5.0.37-2) experimental; urgency=medium
+
+  * Cherry-pick upstream patch e142436 (Closes: #1012900)
+  * Work around a build-breaking inlining issue
+
+ -- Dennis Filder <d.filder@web.de>  Sun, 24 Jul 2022 08:32:53 +0000
+
+bctoolbox (5.0.37-1) experimental; urgency=medium
+
+  * Team upload
+  * New upstream version 5.0.37
+
+  [Dennis Filder]
+  * libdecaf support.
+  * Adjust to GCC 11 (Closes: #983985)
+  * Declare libbctoolbox-dev Multi-Arch: same
+  * Support for DTLS SRTP protection profiles as provided by mbedTLS 2.28
+
+ -- Dennis Filder <d.filder@web.de>  Fri, 28 Jan 2022 19:51:47 +0100
 
 bctoolbox (4.4.13-2) unstable; urgency=medium
 

@@ -2,8 +2,9 @@
 # See debhelper(7)
 #export DH_VERBOSE = 1
 
-export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+include /usr/share/dpkg/pkg-info.mk
 
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 %:
 	dh $@ --buildsystem=cmake
 
@@ -14,4 +15,9 @@ export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 # Upstream unconditionally sets CMAKE_INSTALL_RPATH. Make it ineffective by
 # setting CMAKE_SKIP_RPATH
 override_dh_auto_configure:
-	dh_auto_configure -- -DCMAKE_SKIP_RPATH=ON -DENABLE_TESTS_COMPONENT=OFF
+	dh_auto_configure -- -DCMAKE_SKIP_RPATH=ON -DENABLE_TESTS_COMPONENT=OFF \
+	-DDEB_VERSION_UPSTREAM=$(DEB_VERSION_UPSTREAM) \
+	-DENABLE_DECAF=ON
+
+execute_after_dh_install:
+	dh_install debian/upstream-version-from-changelog usr/share/bctoolbox/

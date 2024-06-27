@@ -1,3 +1,4 @@
 # Some of the symbols we export are C++ symbols.  Tracking those is more trouble
 # than it's worth.
 no-symbols-control-file
+libbctoolbox1t64: package-name-doesnt-match-sonames libbctoolbox1

@@ -26,11 +26,20 @@
 /* Each algo is defined as a bit toggled in a 32 bits integer,
  * so we can easily ask for all availables ones
  */
-#define BCTBX_DHM_UNSET		0x00000000
-#define BCTBX_DHM_2048		0x00000001
-#define BCTBX_DHM_3072		0x00000002
-#define BCTBX_ECDH_X25519	0x00000004
-#define BCTBX_ECDH_X448		0x00000008
+#define BCTBX_DHM_UNSET				0x00000000
+#define BCTBX_DHM_2048				0x00000001
+#define BCTBX_DHM_3072				0x00000002
+#define BCTBX_ECDH_X25519			0x00000004
+#define BCTBX_ECDH_X448				0x00000008
+#define BCTBX_KEM_KYBER512			0x00000010
+#define BCTBX_KEM_KYBER768			0x00000020
+#define BCTBX_KEM_KYBER1024			0x00000040
+#define BCTBX_KEM_HQC128			0x00000080
+#define BCTBX_KEM_HQC192			0x00000100
+#define BCTBX_KEM_HQC256			0x00000200
+#define BCTBX_KEM_X25519			0x00000400
+#define BCTBX_KEM_X448				0x00000800
+
 
 /* EdDSA defines */
 #define BCTBX_EDDSA_UNSET	0
@@ -315,7 +324,7 @@ BCTBX_PUBLIC void  bctbx_x509_certificate_free(bctbx_x509_certificate_t *cert);
  *
  * @return a pointer to a null terminated string containing the certificate in PEM format. This buffer must then be freed by caller. NULL on failure.
  */
-BCTBX_PUBLIC char *bctbx_x509_certificates_chain_get_pem(bctbx_x509_certificate_t *cert);
+BCTBX_PUBLIC char *bctbx_x509_certificates_chain_get_pem(const bctbx_x509_certificate_t *cert);
 
 /**
  * @brief	Return an informational string about the certificate
@@ -510,7 +519,7 @@ BCTBX_PUBLIC int32_t bctbx_ssl_config_set_transport (bctbx_ssl_config_t *ssl_con
 BCTBX_PUBLIC int32_t bctbx_ssl_config_set_authmode(bctbx_ssl_config_t *ssl_config, int authmode);
 BCTBX_PUBLIC int32_t bctbx_ssl_config_set_rng(bctbx_ssl_config_t *ssl_config, int(*rng_function)(void *, unsigned char *, size_t), void *rng_context);
 BCTBX_PUBLIC int32_t bctbx_ssl_config_set_callback_verify(bctbx_ssl_config_t *ssl_config, int(*callback_function)(void *, bctbx_x509_certificate_t *, int, uint32_t *), void *callback_data);
-BCTBX_PUBLIC int32_t bctbx_ssl_config_set_callback_cli_cert(bctbx_ssl_config_t *ssl_config, int(*callback_function)(void *, bctbx_ssl_context_t *, unsigned char *, size_t), void *callback_data);
+BCTBX_PUBLIC int32_t bctbx_ssl_config_set_callback_cli_cert(bctbx_ssl_config_t *ssl_config, int(*callback_function)(void *, bctbx_ssl_context_t *, const bctbx_list_t *), void *callback_data);
 BCTBX_PUBLIC int32_t bctbx_ssl_config_set_ca_chain(bctbx_ssl_config_t *ssl_config, bctbx_x509_certificate_t *ca_chain);
 BCTBX_PUBLIC int32_t bctbx_ssl_config_set_own_cert(bctbx_ssl_config_t *ssl_config, bctbx_x509_certificate_t *cert, bctbx_signing_key_t *key);
 BCTBX_PUBLIC int32_t bctbx_ssl_config_set_ciphersuites(bctbx_ssl_config_t *ssl_config,const int *ciphersuites);
@@ -518,7 +527,7 @@ BCTBX_PUBLIC int32_t bctbx_ssl_config_set_ciphersuites(bctbx_ssl_config_t *ssl_c
 /***** DTLS-SRTP functions *****/
 BCTBX_PUBLIC bctbx_dtls_srtp_profile_t bctbx_ssl_get_dtls_srtp_protection_profile(bctbx_ssl_context_t *ssl_ctx);
 BCTBX_PUBLIC int32_t bctbx_ssl_config_set_dtls_srtp_protection_profiles(bctbx_ssl_config_t *ssl_config, const bctbx_dtls_srtp_profile_t *profiles, size_t profiles_number);
-BCTBX_PUBLIC int32_t bctbx_ssl_get_dtls_srtp_key_material(bctbx_ssl_context_t *ssl_ctx, char *output, size_t *output_length);
+BCTBX_PUBLIC int32_t bctbx_ssl_get_dtls_srtp_key_material(bctbx_ssl_config_t *ssl_ctx, uint8_t *output, size_t *output_length);
 BCTBX_PUBLIC uint8_t bctbx_dtls_srtp_supported(void);
 BCTBX_PUBLIC void bctbx_ssl_set_mtu(bctbx_ssl_context_t *ssl_ctx, uint16_t mtu);
 
@@ -878,7 +887,7 @@ BCTBX_PUBLIC void bctbx_sha256(const uint8_t *input,
 		uint8_t hashLength,
 		uint8_t *output);
 
-/*
+/**
  * @brief HMAC-SHA512 wrapper
  * @param[in] 	key		HMAC secret key
  * @param[in] 	keyLength	HMAC key length
