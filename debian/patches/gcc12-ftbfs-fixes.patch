@@ -1,0 +1,23 @@
+Description: Thwart overeager g++12 interprocedural optimization
+ When building the static library g++12 IPA does some inlining which
+ amounts to statement-reordering that then causes a use-after-free in
+ src/containers/map.cc:bctbx_iterator_ullong_get_next_and_delete() and
+ src/containers/map.cc:bctbx_iterator_cchar_get_next_and_delete()
+ which breaks the build.  This patch prevents the inlining.
+ .
+ This could also be a GCC bug.
+Author: Dennis Filder <d.filder@web.de>
+Last-Update: 2022-07-24
+--- a/include/bctoolbox/map.h
++++ b/include/bctoolbox/map.h
+@@ -82,8 +82,8 @@
+ BCTBX_PUBLIC bctbx_pair_t *bctbx_iterator_cchar_get_pair(const bctbx_iterator_t *it);
+ /*return same pointer but pointing to next*/
+ #define bctbx_iterator_get_next bctbx_iterator_ullong_get_next
+-BCTBX_PUBLIC bctbx_iterator_t *bctbx_iterator_ullong_get_next(bctbx_iterator_t *it);
+-BCTBX_PUBLIC bctbx_iterator_t *bctbx_iterator_cchar_get_next(bctbx_iterator_t *it);
++BCTBX_PUBLIC bctbx_iterator_t *bctbx_iterator_ullong_get_next(bctbx_iterator_t *it) __attribute__ ((noipa));
++BCTBX_PUBLIC bctbx_iterator_t *bctbx_iterator_cchar_get_next(bctbx_iterator_t *it) __attribute__ ((noipa));
+ #define bctbx_iterator_equals bctbx_iterator_ullong_equals
+ BCTBX_PUBLIC  bool_t bctbx_iterator_ullong_equals(const bctbx_iterator_t *a,const bctbx_iterator_t *b);
+ BCTBX_PUBLIC  bool_t bctbx_iterator_cchar_equals(const bctbx_iterator_t *a,const bctbx_iterator_t *b);

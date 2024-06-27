@@ -189,7 +189,7 @@ int32_t bctbx_signing_key_parse_file(bctbx_signing_key_t *key, const char *path,
 
 
 /*** Certificate ***/
-char *bctbx_x509_certificates_chain_get_pem(bctbx_x509_certificate_t *cert) {
+char *bctbx_x509_certificates_chain_get_pem(const bctbx_x509_certificate_t *cert) {
 	char *pem_certificate = NULL;
 	size_t olen=0;
 
@@ -462,7 +462,7 @@ int32_t bctbx_x509_certificate_get_fingerprint(const bctbx_x509_certificate_t *c
 		break;
 
 		case POLARSSL_MD_SHA512:
-			sha512(crt->raw.p, crt->raw.len, buffer, 0); /* last argument is a boolean, indicate to output sha-384 and not sha-512 */
+            sha512(crt->raw.p, crt->raw.len, buffer, 0);
 			hash_length = 64;
 			hash_alg_string="SHA-512";
 		break;

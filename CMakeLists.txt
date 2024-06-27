@@ -1,6 +1,6 @@
 ############################################################################
 # CMakeLists.txt
-# Copyright (C) 2010-2019  Belledonne Communications, Grenoble France
+# Copyright (C) 2010-2021  Belledonne Communications, Grenoble France
 #
 ############################################################################
 #
@@ -21,9 +21,14 @@
 ############################################################################
 
 cmake_minimum_required(VERSION 3.2)
-set(CMAKE_MACOSX_RPATH ON) # Before cmake 3.0.0, MACOSX_RPATH was not set to ON by default - however this is no good reason to not enable it by default
 
-project(bctoolbox VERSION 4.4.0)
+# CMP0077 policy is required by Flexisip build. Remove it once the CMake required
+# version is higer or equal to 3.13.
+if(NOT CMAKE_VERSION VERSION_LESS 3.13)
+	cmake_policy(SET CMP0077 NEW)
+endif()
+
+project(bctoolbox VERSION 5.2.0)
 
 set(BCTOOLBOX_VERSION "${PROJECT_VERSION}")
 set(BCTOOLBOX_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
@@ -42,6 +47,11 @@ option(ENABLE_STRICT "Pass strict flags to the compiler" ON)
 option(ENABLE_TESTS_COMPONENT "Enable compilation of tests helper library" ON)
 option(ENABLE_TESTS "Enable compilation of tests" ON)
 option(ENABLE_PACKAGE_SOURCE "Create 'package_source' target for source archive making (CMake >= 3.11)" OFF)
+option(ENABLE_DEFAULT_LOG_HANDLER "A default log handler will be initialized, if OFF no logging will be done before you initialize one." ON)
+
+# Hidden non-cache options:
+# * DISABLE_BC_PACKAGE_SEARCH: skip find_package() for every BC package (bctoolbox, ortp, etc.)
+
 
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_EXTENSIONS NO)
@@ -65,10 +75,23 @@ if(APPLE)
 endif()
 
 if(ENABLE_MBEDTLS)
-	find_package(MbedTLS)
+	message(STATUS "MBEDTLS Enabled")
+	if(NOT DISABLE_MBEDTLS_SEARCH)
+		message(STATUS "MBEDTLS Enabled search enabled")
+		find_package(MbedTLS)
+	else()
+		message(STATUS "MBEDTLS Enabled search disabled")
+		set (MBEDTLS_FOUND On)
+		set (DTLS_SRTP_AVAILABLE On) # we using internal Mbedtls lib, we always have DTLS-SRTP
+	endif()
 	if(MBEDTLS_FOUND)
 		message(STATUS "Using mbedTLS")
 		set(HAVE_MBEDTLS 1)
+		set(MBEDTLS_TARGETS
+			mbedtls
+			mbedx509
+			mbedcrypto
+		)
 	endif()
 endif()
 
@@ -91,34 +114,35 @@ if(ENABLE_POLARSSL AND NOT MBEDTLS_FOUND)
 	endif()
 endif()
 
-if(HAVE_SSL_GET_DTLS_SRTP_PROTECTION_PROFILE)
+if(DTLS_SRTP_AVAILABLE)
 	message(STATUS "DTLS SRTP available")
 	set(HAVE_DTLS_SRTP 1)
 else()
 	message(STATUS "DTLS SRTP not available")
 endif()
 
-if(MBEDTLS_FOUND)
-	get_filename_component(mbedtls_library_path "${MBEDTLS_LIBRARIES}" PATH)
-	string(REPLACE ";" " " MBEDTLS_LIBRARIES_STR "${MBEDTLS_LIBRARIES}")
-	set(LIBS_PRIVATE "${LIBS_PRIVATE} ${MBEDTLS_LIBRARIES_STR}")
-endif()
 if(POLARSSL_FOUND)
 	get_filename_component(polarssl_library_path "${POLARSSL_LIBRARIES}" PATH)
 	set(LIBS_PRIVATE "${LIBS_PRIVATE} -L${polarssl_library_path} -lpolarssl")
 endif()
 
-if(ENABLE_TESTS_COMPONENT)
-  find_package(BcUnit CONFIG REQUIRED)
-  cmake_push_check_state(RESET)
-	list(APPEND CMAKE_REQUIRED_INCLUDES ${BCUNIT_INCLUDE_DIRS})
-	list(APPEND CMAKE_REQUIRED_LIBRARIES ${BCUNIT_LIBRARIES})
-	check_symbol_exists("CU_get_suite" "BCUnit/BCUnit.h" HAVE_CU_GET_SUITE)
-	check_symbol_exists("CU_curses_run_tests" "BCUnit/BCUnit.h" HAVE_CU_CURSES)
-	check_symbol_exists("CU_set_trace_handler" "BCUnit/Util.h" HAVE_CU_SET_TRACE_HANDLER)
-	cmake_pop_check_state()
-	set(TESTER_REQUIRES_PRIVATE "bcunit")
-endif()
+if (ENABLE_TESTS_COMPONENT)
+	if (NOT DISABLE_BC_PACKAGE_SEARCH)
+		find_package(BcUnit CONFIG REQUIRED)
+		cmake_push_check_state(RESET)
+		list(APPEND CMAKE_REQUIRED_INCLUDES ${BCUNIT_INCLUDE_DIRS})
+		list(APPEND CMAKE_REQUIRED_LIBRARIES ${BCUNIT_LIBRARIES})
+		check_symbol_exists("CU_get_suite" "BCUnit/BCUnit.h" HAVE_CU_GET_SUITE)
+		check_symbol_exists("CU_curses_run_tests" "BCUnit/BCUnit.h" HAVE_CU_CURSES)
+		check_symbol_exists("CU_set_trace_handler" "BCUnit/Util.h" HAVE_CU_SET_TRACE_HANDLER)
+		cmake_pop_check_state()
+		set(TESTER_REQUIRES_PRIVATE "bcunit")
+	else ()
+		set(HAVE_CU_GET_SUITE ON)
+		set(HAVE_CU_SET_TRACE_HANDLER ON)
+		set(TESTER_REQUIRES_PRIVATE "bcunit")
+	endif ()
+endif ()
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/bctoolbox.pc.in ${CMAKE_CURRENT_BINARY_DIR}/bctoolbox.pc)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/bctoolbox.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
@@ -151,7 +175,12 @@ set(EXPORT_TARGETS_NAME "bctoolbox")
 
 check_library_exists("rt" "clock_gettime" "" HAVE_LIBRT)
 check_library_exists("dl" "dladdr" "" HAVE_LIBDL)
-check_include_file("execinfo.h" HAVE_EXECINFO)
+
+if(ANDROID)
+	set(HAVE_EXECINFO 0)
+else()
+	check_include_file("execinfo.h" HAVE_EXECINFO)
+endif()
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config.h)
 set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/config.h PROPERTIES GENERATED ON)

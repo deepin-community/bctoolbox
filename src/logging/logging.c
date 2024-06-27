@@ -22,6 +22,11 @@
 #endif
 
 #include "bctoolbox/logging.h"
+
+#ifdef _WIN32
+extern void setStackTraceHooks();
+#endif
+
 #include <time.h>
 #include <stdio.h>
 #include <sys/stat.h>
@@ -130,21 +135,28 @@ static void wrapper(void* info,const char *domain, BctbxLogLevel lev, const char
 static bctbx_logger_t main_logger = {0};
 static bctbx_log_handler_t static_handler = {0};
 
-static bctbx_logger_t * bctbx_get_logger(void){
-	if (main_logger.default_log_domain == NULL){
-		main_logger.default_log_domain = bctbx_log_domain_new(NULL, BCTBX_LOG_WARNING | BCTBX_LOG_ERROR | BCTBX_LOG_FATAL);
+static void initialize_default_handler(void) {
+	main_logger.default_handler = &static_handler;
+	static_handler.func = wrapper;
+	static_handler.destroy = (BctbxLogHandlerDestroyFunc)bctbx_logv_out_destroy;
+	static_handler.user_info = (void*)bctbx_logv_out;
+	bctbx_add_log_handler(&static_handler);
+}
+
+static bctbx_logger_t* bctbx_get_logger(void) {
+	if (main_logger.default_log_domain == NULL) {
+		main_logger.default_log_domain =
+		    bctbx_log_domain_new(NULL, BCTBX_LOG_WARNING | BCTBX_LOG_ERROR | BCTBX_LOG_FATAL);
 		bctbx_mutex_init(&main_logger.domains_mutex, NULL);
 		bctbx_mutex_init(&main_logger.log_mutex, NULL);
-		main_logger.default_handler = &static_handler;
-		static_handler.func=wrapper;
-		static_handler.destroy=(BctbxLogHandlerDestroyFunc)bctbx_logv_out_destroy;
-		static_handler.user_info=(void*)bctbx_logv_out;
-		bctbx_add_log_handler(&static_handler);
+#if ENABLE_DEFAULT_LOG_HANDLER
+		initialize_default_handler();
+#endif
 	}
 	return &main_logger;
 }
 
-void bctbx_init_logger(bool_t create){
+void bctbx_init_logger(bool_t create) {
 	bctbx_get_logger();
 }
 
@@ -261,9 +273,15 @@ void bctbx_set_log_handler(BctbxLogFunc func){
 	bctbx_set_log_handler_for_domain(func,NULL);
 }
 
-void bctbx_set_log_handler_for_domain(BctbxLogFunc func, const char* domain){
-	bctbx_log_handler_t *h = bctbx_get_logger()->default_handler;
-	h->user_info=(void*)func;
+void bctbx_set_log_handler_for_domain(BctbxLogFunc func, const char* domain) {
+	bctbx_log_handler_t* h = bctbx_get_logger()->default_handler;
+
+	if (h == NULL) {
+		initialize_default_handler();
+		h = bctbx_get_logger()->default_handler;
+	}
+
+	h->user_info = (void*)func;
 	bctbx_log_handler_set_domain(h, domain);
 }
 
@@ -451,7 +469,7 @@ char *bctbx_strcat_printf(char* dst, const char *fmt,...){
 	return ret;
 }
 
-#if	defined(_WIN32) || defined(_WIN32_WCE)
+#if	!defined(BCTBX_WINDOWS_UWP) && (defined(_WIN32) || defined(_WIN32_WCE))
 #define ENDLINE "\r\n"
 #else
 #define ENDLINE "\n"
@@ -663,39 +681,31 @@ static int _try_open_log_collection_file(bctbx_file_log_handler_t *filehandler) 
 static void _rotate_log_collection_files(bctbx_file_log_handler_t *filehandler) {
 	char *log_filename;
 	char *log_filename2;
-	char *file_no_extension = bctbx_strdup(filehandler->name);
-	char *extension = strrchr(file_no_extension, '.');
-	char *extension2 = bctbx_strdup(extension);
 	int n = 1;
-	file_no_extension[extension - file_no_extension] = '\0';
 
-	log_filename = bctbx_strdup_printf("%s/%s_1%s",
+	log_filename = bctbx_strdup_printf("%s/%s_1",
 		filehandler->path,
-		file_no_extension,
-		extension2);
+		filehandler->name);
 	while(access(log_filename, F_OK) != -1) {
 		// file exists
 		n++;
 		bctbx_free(log_filename);
-		log_filename = bctbx_strdup_printf("%s/%s_%d%s",
+		log_filename = bctbx_strdup_printf("%s/%s_%d",
 		filehandler->path,
-		file_no_extension,
-		n,
-		extension2);
+		filehandler->name,
+		n);
 	}
 	
 	while(n > 1) {
 		bctbx_free(log_filename);
-		log_filename = bctbx_strdup_printf("%s/%s_%d%s",
+		log_filename = bctbx_strdup_printf("%s/%s_%d",
 		filehandler->path,
-		file_no_extension,
-		n-1,
-		extension2);
-		log_filename2 = bctbx_strdup_printf("%s/%s_%d%s",
+		filehandler->name,
+		n-1);
+		log_filename2 = bctbx_strdup_printf("%s/%s_%d",
 		filehandler->path,
-		file_no_extension,
-		n,
-		extension2);
+		filehandler->name,
+		n);
 
 		n--;
 		rename(log_filename, log_filename2);
@@ -703,17 +713,14 @@ static void _rotate_log_collection_files(bctbx_file_log_handler_t *filehandler) 
 	}
 	bctbx_free(log_filename);
 	log_filename = bctbx_strdup_printf("%s/%s",
-	filehandler->path,
-	filehandler->name);
-	log_filename2 = bctbx_strdup_printf("%s/%s_1%s",
-	filehandler->path,
-	file_no_extension,
-	extension2);
+		filehandler->path,
+		filehandler->name);
+	log_filename2 = bctbx_strdup_printf("%s/%s_1",
+		filehandler->path,
+		filehandler->name);
 	rename(log_filename, log_filename2);
 	bctbx_free(log_filename);
 	bctbx_free(log_filename2);
-	bctbx_free(extension2);
-	bctbx_free(file_no_extension);
 }
 
 static void _open_log_collection_file(bctbx_file_log_handler_t *filehandler) {
