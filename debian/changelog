@@ -1,3 +1,9 @@
+bctoolbox (5.2.0-2deepin1) unstable; urgency=medium
+
+  * No source change upload against mbedtls 2.28.
+
+ -- Tianyu Chen <sweetyfish@deepin.org>  Tue, 18 Nov 2025 16:32:05 +0800
+
 bctoolbox (5.2.0-2deepin0) unstable; urgency=medium
 
   * No source change upload against GCC 12.
